@@ -1,6 +1,18 @@
 import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
+import {
+  connectIntegration,
+  defaultAgentConfig,
+  fetchDriveFiles,
+  publishGrades,
+} from './services/agentIntegration'
+import type {
+  AgentIntegrationConfig,
+  DriveFile,
+  IntegrationProvider,
+  PublicationRecord,
+} from './services/agentIntegration'
 
 type Section =
   | 'Início'
@@ -23,22 +35,6 @@ type UploadedItem = {
   type: 'CSV' | 'PDF'
   size: string
   rows?: string[][]
-}
-
-type DriveFile = {
-  id: string
-  name: string
-  type: 'CSV' | 'PDF'
-  size: number
-  content?: string
-}
-
-type PublicationRecord = {
-  id: number
-  timestamp: string
-  className: string
-  students: number
-  status: 'Publicado'
 }
 
 type Holiday = {
@@ -91,29 +87,6 @@ const initialHolidays: Holiday[] = [
 const evaluationsSeed = [
   { name: 'Prova Bimestral Matemática', className: '7º A', school: 'Escola Aurora', date: '2026-05-03', status: 'Agendada' },
   { name: 'Simulado Ciências', className: '8º B', school: 'Colégio Horizonte', date: '2026-05-05', status: 'Rascunho' },
-]
-
-const mockedDriveFiles: DriveFile[] = [
-  {
-    id: 'drv-1',
-    name: 'alunos_7a.csv',
-    type: 'CSV',
-    size: 2450,
-    content: 'Pedro Rocha,Transferido da unidade 2\nMarina Lessa,Aluna bolsista\nRafael Dias,Precisa reforço em matemática',
-  },
-  {
-    id: 'drv-2',
-    name: 'ocorrencias_maio.pdf',
-    type: 'PDF',
-    size: 428900,
-  },
-  {
-    id: 'drv-3',
-    name: 'atualizacao_cadastro.csv',
-    type: 'CSV',
-    size: 1820,
-    content: 'Lorena Alves,Contato da mãe atualizado\nMateus Melo,Documentação pendente',
-  },
 ]
 
 function formatDate(isoDate: string) {
@@ -214,6 +187,9 @@ function App() {
   const [selectedDriveFileId, setSelectedDriveFileId] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [publicationRecords, setPublicationRecords] = useState<PublicationRecord[]>([])
+  const [agentConfig, setAgentConfig] = useState<AgentIntegrationConfig>(
+    defaultAgentConfig,
+  )
   const [evaluationForm, setEvaluationForm] = useState({
     name: '',
     description: '',
@@ -345,15 +321,41 @@ function App() {
     })
   }, [])
 
-  const fetchFilesFromDrive = () => {
+  const connectProvider = async (provider: IntegrationProvider) => {
+    try {
+      await connectIntegration(provider, agentConfig)
+
+      if (provider === 'drive') {
+        setDriveConnected(true)
+        setIntegrationMessage('Drive conectado com sucesso.')
+        return
+      }
+
+      setOfficialSystemConnected(true)
+      setIntegrationMessage('Sistema oficial conectado.')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao conectar integração.'
+      setIntegrationMessage(message)
+    }
+  }
+
+  const fetchFilesFromDriveAction = async () => {
     if (!driveConnected) {
       setIntegrationMessage('Conecte o Drive antes de buscar arquivos.')
       return
     }
 
-    setDriveFiles(mockedDriveFiles)
-    setSelectedDriveFileId(mockedDriveFiles[0]?.id ?? '')
-    setIntegrationMessage(`${mockedDriveFiles.length} arquivos encontrados no Drive.`)
+    try {
+      const files = await fetchDriveFiles(agentConfig)
+      setDriveFiles(files)
+      setSelectedDriveFileId(files[0]?.id ?? '')
+      setIntegrationMessage(`${files.length} arquivos encontrados no Drive.`)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao buscar arquivos no Drive.'
+      setIntegrationMessage(message)
+    }
   }
 
   const importSelectedDriveFile = () => {
@@ -391,24 +393,26 @@ function App() {
     setIntegrationMessage(`Arquivo ${selectedFile.name} anexado ao histórico.`)
   }
 
-  const publishGradesToOfficialSystem = () => {
+  const publishGradesToOfficialSystem = async () => {
     if (!officialSystemConnected) {
       setIntegrationMessage('Conecte o sistema oficial para publicar notas.')
       return
     }
 
-    const newRecord: PublicationRecord = {
-      id: Date.now(),
-      timestamp: new Date().toLocaleString('pt-BR'),
-      className: activeClass,
-      students: students.length,
-      status: 'Publicado',
+    try {
+      const newRecord = await publishGrades(agentConfig, {
+        className: activeClass,
+        students: students.length,
+      })
+      setPublicationRecords((prev) => [newRecord, ...prev])
+      setIntegrationMessage(
+        `Notas da turma ${activeClass} publicadas para ${students.length} alunos.`,
+      )
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao publicar notas.'
+      setIntegrationMessage(message)
     }
-
-    setPublicationRecords((prev) => [newRecord, ...prev])
-    setIntegrationMessage(
-      `Notas da turma ${activeClass} publicadas para ${students.length} alunos.`,
-    )
   }
 
   const renderContent = () => {
@@ -818,12 +822,13 @@ function App() {
                 className={`btn ${driveConnected ? 'btn-accent' : ''}`}
                 type="button"
                 onClick={() => {
-                  setDriveConnected((prev) => !prev)
-                  setIntegrationMessage(
-                    !driveConnected
-                      ? 'Drive conectado com sucesso.'
-                      : 'Drive desconectado.',
-                  )
+                  if (driveConnected) {
+                    setDriveConnected(false)
+                    setIntegrationMessage('Drive desconectado.')
+                    return
+                  }
+
+                  void connectProvider('drive')
                 }}
               >
                 {driveConnected ? 'Drive conectado' : 'Conectar Drive'}
@@ -832,12 +837,13 @@ function App() {
                 className={`btn ${officialSystemConnected ? 'btn-accent' : ''}`}
                 type="button"
                 onClick={() => {
-                  setOfficialSystemConnected((prev) => !prev)
-                  setIntegrationMessage(
-                    !officialSystemConnected
-                      ? 'Sistema oficial conectado.'
-                      : 'Sistema oficial desconectado.',
-                  )
+                  if (officialSystemConnected) {
+                    setOfficialSystemConnected(false)
+                    setIntegrationMessage('Sistema oficial desconectado.')
+                    return
+                  }
+
+                  void connectProvider('official-system')
                 }}
               >
                 {officialSystemConnected
@@ -847,7 +853,11 @@ function App() {
             </div>
 
             <div className="integration-row">
-              <button className="btn" type="button" onClick={fetchFilesFromDrive}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => void fetchFilesFromDriveAction()}
+              >
                 Buscar arquivos no Drive
               </button>
               <button
@@ -884,10 +894,59 @@ function App() {
               <button
                 className="btn btn-accent"
                 type="button"
-                onClick={publishGradesToOfficialSystem}
+                onClick={() => void publishGradesToOfficialSystem()}
               >
                 Publicar notas no sistema oficial
               </button>
+            </div>
+
+            <div className="form integration-config">
+              <h4>Configuração futura da API de IA</h4>
+              <select
+                value={agentConfig.mode}
+                onChange={(event) =>
+                  setAgentConfig((prev) => ({
+                    ...prev,
+                    mode: event.target.value as AgentIntegrationConfig['mode'],
+                  }))
+                }
+              >
+                <option value="mock">Modo simulado (atual)</option>
+                <option value="api">Modo API (futuro)</option>
+              </select>
+              <input
+                placeholder="Base URL da API"
+                value={agentConfig.baseUrl}
+                onChange={(event) =>
+                  setAgentConfig((prev) => ({ ...prev, baseUrl: event.target.value }))
+                }
+              />
+              <label className="checkbox-line">
+                <input
+                  type="checkbox"
+                  checked={agentConfig.aiApiEnabled}
+                  onChange={(event) =>
+                    setAgentConfig((prev) => ({
+                      ...prev,
+                      aiApiEnabled: event.target.checked,
+                    }))
+                  }
+                />
+                Ativar agente por API de IA
+              </label>
+              <label className="checkbox-line">
+                <input
+                  type="checkbox"
+                  checked={agentConfig.apiKeyConfigured}
+                  onChange={(event) =>
+                    setAgentConfig((prev) => ({
+                      ...prev,
+                      apiKeyConfigured: event.target.checked,
+                    }))
+                  }
+                />
+                Chave de API configurada
+              </label>
             </div>
 
             <p className="muted">{integrationMessage || 'Sem operações recentes.'}</p>

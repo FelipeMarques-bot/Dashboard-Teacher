@@ -96,6 +96,11 @@
   gap: 1rem;
 }
 
+.content-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .schedule-list,
 .alert-list,
 .student-list,
@@ -264,6 +269,46 @@ textarea {
 
 .hidden-input {
   display: none;
+}
+
+.integration-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
+.drive-file-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.drive-file-item {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: #f8fafc;
+}
+
+.integration-config {
+  margin-top: 0.8rem;
+}
+
+.checkbox-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.drive-file-item input,
+.checkbox-line input {
+  width: auto;
 }
 
 .muted {

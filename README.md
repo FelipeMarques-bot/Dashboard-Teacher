@@ -10,6 +10,8 @@ Dashboard de gestão escolar para professores com interface moderna, responsiva 
 - Gestão de turmas com tabela de notas editável inline, média automática e observações.
 - Tela de avaliações com formulário e prévia de datas de aviso considerando finais de semana e feriados.
 - Upload de listas/arquivos em **CSV ou PDF** para alunos e informações, incluindo importação básica de alunos a partir de CSV.
+- Integrações do agente com fluxo para: conectar Drive, buscar/importar arquivos e publicar notas no sistema oficial.
+- Estrutura **API-ready** para integração futura com IA (modo `mock` e modo `api`, com configuração de base URL e chave).
 
 ## Como executar
 
