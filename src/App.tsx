@@ -25,6 +25,22 @@ type UploadedItem = {
   rows?: string[][]
 }
 
+type DriveFile = {
+  id: string
+  name: string
+  type: 'CSV' | 'PDF'
+  size: number
+  content?: string
+}
+
+type PublicationRecord = {
+  id: number
+  timestamp: string
+  className: string
+  students: number
+  status: 'Publicado'
+}
+
 type Holiday = {
   name: string
   date: string
@@ -75,6 +91,29 @@ const initialHolidays: Holiday[] = [
 const evaluationsSeed = [
   { name: 'Prova Bimestral Matemática', className: '7º A', school: 'Escola Aurora', date: '2026-05-03', status: 'Agendada' },
   { name: 'Simulado Ciências', className: '8º B', school: 'Colégio Horizonte', date: '2026-05-05', status: 'Rascunho' },
+]
+
+const mockedDriveFiles: DriveFile[] = [
+  {
+    id: 'drv-1',
+    name: 'alunos_7a.csv',
+    type: 'CSV',
+    size: 2450,
+    content: 'Pedro Rocha,Transferido da unidade 2\nMarina Lessa,Aluna bolsista\nRafael Dias,Precisa reforço em matemática',
+  },
+  {
+    id: 'drv-2',
+    name: 'ocorrencias_maio.pdf',
+    type: 'PDF',
+    size: 428900,
+  },
+  {
+    id: 'drv-3',
+    name: 'atualizacao_cadastro.csv',
+    type: 'CSV',
+    size: 1820,
+    content: 'Lorena Alves,Contato da mãe atualizado\nMateus Melo,Documentação pendente',
+  },
 ]
 
 function formatDate(isoDate: string) {
@@ -169,6 +208,12 @@ function App() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedItem[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>(initialHolidays)
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
+  const [driveConnected, setDriveConnected] = useState(false)
+  const [officialSystemConnected, setOfficialSystemConnected] = useState(false)
+  const [driveFiles, setDriveFiles] = useState<DriveFile[]>([])
+  const [selectedDriveFileId, setSelectedDriveFileId] = useState('')
+  const [integrationMessage, setIntegrationMessage] = useState('')
+  const [publicationRecords, setPublicationRecords] = useState<PublicationRecord[]>([])
   const [evaluationForm, setEvaluationForm] = useState({
     name: '',
     description: '',
@@ -199,6 +244,23 @@ function App() {
     date: '',
     type: 'Municipal' as Holiday['type'],
   })
+
+  const importStudentsFromRows = (rows: string[][]) => {
+    if (rows.length === 0) return
+
+    const importedStudents = rows
+      .map((row, index) => ({
+        id: Date.now() + index,
+        name: row[0] || `Aluno importado ${index + 1}`,
+        grades: [0, 0, 0],
+        note: row[1] || '',
+      }))
+      .filter((student) => student.name.trim().length > 0)
+
+    if (importedStudents.length > 0) {
+      setStudents((prev) => [...prev, ...importedStudents])
+    }
+  }
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files) return
@@ -231,20 +293,7 @@ function App() {
       .filter((file) => file.type === 'CSV' && file.rows && file.rows.length > 0)
       .flatMap((file) => file.rows ?? [])
 
-    if (csvRows.length > 0) {
-      const importedStudents = csvRows
-        .map((row, index) => ({
-          id: Date.now() + index,
-          name: row[0] || `Aluno importado ${index + 1}`,
-          grades: [0, 0, 0],
-          note: row[1] || '',
-        }))
-        .filter((student) => student.name.trim().length > 0)
-
-      if (importedStudents.length > 0) {
-        setStudents((prev) => [...prev, ...importedStudents])
-      }
-    }
+    importStudentsFromRows(csvRows)
   }
 
   const updateGrade = (studentId: number, gradeIndex: number, value: string) => {
@@ -295,6 +344,72 @@ function App() {
       return index - firstWeekDay + 1
     })
   }, [])
+
+  const fetchFilesFromDrive = () => {
+    if (!driveConnected) {
+      setIntegrationMessage('Conecte o Drive antes de buscar arquivos.')
+      return
+    }
+
+    setDriveFiles(mockedDriveFiles)
+    setSelectedDriveFileId(mockedDriveFiles[0]?.id ?? '')
+    setIntegrationMessage(`${mockedDriveFiles.length} arquivos encontrados no Drive.`)
+  }
+
+  const importSelectedDriveFile = () => {
+    const selectedFile = driveFiles.find((file) => file.id === selectedDriveFileId)
+    if (!selectedFile) {
+      setIntegrationMessage('Selecione um arquivo do Drive para importar.')
+      return
+    }
+
+    if (selectedFile.type === 'CSV' && selectedFile.content) {
+      const rows = parseCsv(selectedFile.content)
+      importStudentsFromRows(rows)
+
+      setUploadedFiles((prev) => [
+        {
+          name: selectedFile.name,
+          type: 'CSV',
+          size: fileSizeLabel(selectedFile.size),
+          rows,
+        },
+        ...prev,
+      ])
+      setIntegrationMessage(`Arquivo ${selectedFile.name} importado com sucesso.`)
+      return
+    }
+
+    setUploadedFiles((prev) => [
+      {
+        name: selectedFile.name,
+        type: 'PDF',
+        size: fileSizeLabel(selectedFile.size),
+      },
+      ...prev,
+    ])
+    setIntegrationMessage(`Arquivo ${selectedFile.name} anexado ao histórico.`)
+  }
+
+  const publishGradesToOfficialSystem = () => {
+    if (!officialSystemConnected) {
+      setIntegrationMessage('Conecte o sistema oficial para publicar notas.')
+      return
+    }
+
+    const newRecord: PublicationRecord = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleString('pt-BR'),
+      className: activeClass,
+      students: students.length,
+      status: 'Publicado',
+    }
+
+    setPublicationRecords((prev) => [newRecord, ...prev])
+    setIntegrationMessage(
+      `Notas da turma ${activeClass} publicadas para ${students.length} alunos.`,
+    )
+  }
 
   const renderContent = () => {
     if (activeSection === 'Início') {
@@ -694,31 +809,136 @@ function App() {
     }
 
     return (
-      <div className="two-column fade-in">
-        <section className="card">
-          <h3>Cadastro de escolas</h3>
-          <form className="form">
-            <input placeholder="Nome da escola" />
-            <input placeholder="Endereço" />
-            <input placeholder="Turnos de funcionamento" />
-            <button className="btn btn-accent" type="button">
-              Adicionar escola
-            </button>
-          </form>
-        </section>
+      <div className="content-stack fade-in">
+        <div className="two-column">
+          <section className="card">
+            <h3>Integrações do agente</h3>
+            <div className="integration-row">
+              <button
+                className={`btn ${driveConnected ? 'btn-accent' : ''}`}
+                type="button"
+                onClick={() => {
+                  setDriveConnected((prev) => !prev)
+                  setIntegrationMessage(
+                    !driveConnected
+                      ? 'Drive conectado com sucesso.'
+                      : 'Drive desconectado.',
+                  )
+                }}
+              >
+                {driveConnected ? 'Drive conectado' : 'Conectar Drive'}
+              </button>
+              <button
+                className={`btn ${officialSystemConnected ? 'btn-accent' : ''}`}
+                type="button"
+                onClick={() => {
+                  setOfficialSystemConnected((prev) => !prev)
+                  setIntegrationMessage(
+                    !officialSystemConnected
+                      ? 'Sistema oficial conectado.'
+                      : 'Sistema oficial desconectado.',
+                  )
+                }}
+              >
+                {officialSystemConnected
+                  ? 'Sistema oficial conectado'
+                  : 'Conectar sistema oficial'}
+              </button>
+            </div>
 
-        <section className="card">
-          <h3>Feriados manuais</h3>
-          <div className="alert-list">
-            {holidays.map((holiday) => (
-              <div key={`${holiday.name}-${holiday.date}`} className="alert-item">
-                <strong>{holiday.name}</strong>
-                <p className="muted">{holiday.type}</p>
-                <small>{formatDate(holiday.date)}</small>
+            <div className="integration-row">
+              <button className="btn" type="button" onClick={fetchFilesFromDrive}>
+                Buscar arquivos no Drive
+              </button>
+              <button
+                className="btn btn-accent"
+                type="button"
+                onClick={importSelectedDriveFile}
+              >
+                Importar arquivo selecionado
+              </button>
+            </div>
+
+            {driveFiles.length > 0 && (
+              <div className="drive-file-list">
+                {driveFiles.map((file) => (
+                  <label key={file.id} className="drive-file-item">
+                    <input
+                      type="radio"
+                      name="drive-file"
+                      checked={selectedDriveFileId === file.id}
+                      onChange={() => setSelectedDriveFileId(file.id)}
+                    />
+                    <div>
+                      <strong>{file.name}</strong>
+                      <p className="muted">
+                        {file.type} • {fileSizeLabel(file.size)}
+                      </p>
+                    </div>
+                  </label>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
+            )}
+
+            <div className="integration-row">
+              <button
+                className="btn btn-accent"
+                type="button"
+                onClick={publishGradesToOfficialSystem}
+              >
+                Publicar notas no sistema oficial
+              </button>
+            </div>
+
+            <p className="muted">{integrationMessage || 'Sem operações recentes.'}</p>
+          </section>
+
+          <section className="card">
+            <h3>Histórico de publicações</h3>
+            {publicationRecords.length === 0 ? (
+              <p className="muted">Nenhuma publicação realizada ainda.</p>
+            ) : (
+              <div className="alert-list">
+                {publicationRecords.map((record) => (
+                  <div key={record.id} className="alert-item">
+                    <strong>{record.className}</strong>
+                    <p className="muted">
+                      {record.students} alunos • {record.timestamp}
+                    </p>
+                    <small>{record.status}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="two-column">
+          <section className="card">
+            <h3>Cadastro de escolas</h3>
+            <form className="form">
+              <input placeholder="Nome da escola" />
+              <input placeholder="Endereço" />
+              <input placeholder="Turnos de funcionamento" />
+              <button className="btn btn-accent" type="button">
+                Adicionar escola
+              </button>
+            </form>
+          </section>
+
+          <section className="card">
+            <h3>Feriados manuais</h3>
+            <div className="alert-list">
+              {holidays.map((holiday) => (
+                <div key={`${holiday.name}-${holiday.date}`} className="alert-item">
+                  <strong>{holiday.name}</strong>
+                  <p className="muted">{holiday.type}</p>
+                  <small>{formatDate(holiday.date)}</small>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
     )
   }
