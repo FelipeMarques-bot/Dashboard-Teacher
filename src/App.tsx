@@ -66,6 +66,8 @@ type Evaluation = {
   status: 'Agendada'
 }
 
+const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -180,8 +182,9 @@ function App() {
   )
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [user, setUser] = useState<User | null>(null)
-  const [authLoading, setAuthLoading] = useState(true)
+  const [authLoading, setAuthLoading] = useState(isFirebaseConfigured)
   const [authError, setAuthError] = useState('')
+  const [dashboardLoadTime] = useState(() => Date.now())
 
   const [classForm, setClassForm] = useState({
     name: '',
@@ -213,7 +216,6 @@ function App() {
 
   useEffect(() => {
     if (!isFirebaseConfigured) {
-      setAuthLoading(false)
       return
     }
 
@@ -250,14 +252,13 @@ function App() {
   }, [activeClass, students])
 
   const upcomingEvaluations = useMemo(() => {
-    const now = Date.now()
-    const inSevenDays = now + 7 * 24 * 60 * 60 * 1000
+    const inSevenDays = dashboardLoadTime + SEVEN_DAYS_IN_MILLISECONDS
 
     return evaluations.filter((evaluation) => {
       const timestamp = new Date(`${evaluation.date}T00:00:00`).getTime()
-      return timestamp >= now && timestamp <= inSevenDays
+      return timestamp >= dashboardLoadTime && timestamp <= inSevenDays
     })
-  }, [evaluations])
+  }, [evaluations, dashboardLoadTime])
 
   const monthDates = useMemo(() => {
     const base = new Date()
@@ -280,7 +281,11 @@ function App() {
   const importStudentsFromRows = (rows: string[][]) => {
     if (rows.length === 0) return
 
-    const className = activeClass || studentForm.className || ''
+    const className = activeClass || studentForm.className
+    if (!className) {
+      setIntegrationMessage('Selecione ou cadastre uma turma antes de importar alunos.')
+      return
+    }
 
     const importedStudents = rows
       .map((row, index) => ({
@@ -658,7 +663,7 @@ function App() {
                     onClick={() => setSelectedDay(day)}
                   >
                     <strong>{day}</strong>
-                    {holiday ? <small>{holiday.name}</small> : <small>Sem evento</small>}
+                    {holiday ? <small>{holiday.name}</small> : <small>Sem eventos</small>}
                   </button>
                 )
               })}

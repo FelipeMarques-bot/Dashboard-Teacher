@@ -25,7 +25,7 @@ npm run build
    - seu domínio customizado (se existir).
 4. Em **Project settings > General**, copie as credenciais Web App.
 
-## Variáveis VITE (onde buscar a API VITE)
+## Variáveis de ambiente VITE (onde buscar)
 
 As variáveis abaixo vêm do painel do seu provedor (Firebase e backend/API):
 
@@ -44,7 +44,7 @@ VITE_API_BASE_URL=
 
 ### Exemplo local
 
-Crie `/home/runner/work/Dashboard-Teacher/Dashboard-Teacher/.env.local` com os valores acima.
+Crie `.env.local` na raiz do projeto com os valores acima.
 
 ## Deploy no Render
 

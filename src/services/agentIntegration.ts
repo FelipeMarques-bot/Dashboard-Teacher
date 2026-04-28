@@ -25,7 +25,7 @@ export type AgentIntegrationConfig = {
 
 export const defaultAgentConfig: AgentIntegrationConfig = {
   aiApiEnabled: false,
-  baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+  baseUrl: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000',
   apiKeyConfigured: false,
   mode: 'mock',
 }
