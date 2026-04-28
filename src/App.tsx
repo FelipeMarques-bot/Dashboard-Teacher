@@ -576,18 +576,22 @@ function App() {
 
           <div className="summary-grid fade-in">
             <article className="card summary-card">
+              <div className="summary-icon summary-icon-blue">🎓</div>
               <p>Turmas ativas</p>
               <strong>{classes.length}</strong>
             </article>
             <article className="card summary-card">
+              <div className="summary-icon summary-icon-yellow">📝</div>
               <p>Avaliações na semana</p>
               <strong>{upcomingEvaluations.length}</strong>
             </article>
             <article className="card summary-card">
+              <div className="summary-icon summary-icon-green">🔔</div>
               <p>Avisos pendentes</p>
               <strong>{upcomingEvaluations.length}</strong>
             </article>
             <article className="card summary-card">
+              <div className="summary-icon summary-icon-purple">👥</div>
               <p>Total de alunos</p>
               <strong>{students.length}</strong>
             </article>
@@ -1254,7 +1258,8 @@ function App() {
   if (authLoading) {
     return (
       <div className="login-layout">
-        <section className="card login-card">
+        <section className="login-card loading-card">
+          <div className="loading-spinner" />
           <h2>Carregando sessão...</h2>
         </section>
       </div>
@@ -1264,31 +1269,42 @@ function App() {
   if (!user) {
     return (
       <div className="login-layout">
-        <section className="card login-card">
-          <h1>Teacher Hub</h1>
-          <p className="muted">
-            Entre com Google para acessar o dashboard e começar com dados limpos.
+        <section className="login-card">
+          <div className="login-brand">
+            <div className="login-brand-icon">🎓</div>
+            <h1>Teacher Hub</h1>
+          </div>
+          <p>
+            Gerencie suas turmas, avaliações e alunos em um único lugar.
+            Faça login com sua conta Google para começar.
           </p>
           <button className="btn btn-accent" type="button" onClick={() => void handleSignIn()}>
-            Entrar com Google
+            🔑 Entrar com Google
           </button>
           {!isFirebaseConfigured && (
-            <p className="muted">
-              Firebase não configurado. Defina as variáveis VITE_FIREBASE_* no Render ou no
-              arquivo .env.local.
+            <p className="muted" style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.4)' }}>
+              Firebase não configurado. Defina as variáveis VITE_FIREBASE_* no Render.
             </p>
           )}
-          {authError && <p className="muted">{authError}</p>}
+          {authError && <p className="login-error">{authError}</p>}
         </section>
       </div>
     )
   }
 
+  const initials = (user.displayName ?? user.email ?? 'P')
+    .split(' ')
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('')
+
   return (
     <div className="layout">
       <aside className="sidebar">
-        <h1>Teacher Hub</h1>
-        <p className="muted sidebar-user">{user.displayName || user.email}</p>
+        <div className="sidebar-brand">
+          <div className="sidebar-brand-icon">🎓</div>
+          <h1>Teacher Hub</h1>
+        </div>
         <nav>
           {navItems.map((item) => (
             <button
@@ -1302,10 +1318,19 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <button className="btn" type="button" onClick={() => void handleSignOut()}>
-            Sair
+          <div className="sidebar-user-card">
+            <div className="sidebar-avatar">{initials}</div>
+            <div className="sidebar-user-info">
+              <span className="sidebar-user-name">
+                {user.displayName || user.email}
+              </span>
+              <span className="sidebar-user-role">Professor(a)</span>
+            </div>
+          </div>
+          <button className="btn-signout" type="button" onClick={() => void handleSignOut()}>
+            ↩ Sair da conta
           </button>
-          {authError && <p className="muted">{authError}</p>}
+          {authError && <p className="muted" style={{ marginTop: '0.5rem', color: '#fca5a5', fontSize: '0.78rem' }}>{authError}</p>}
         </div>
       </aside>
 
