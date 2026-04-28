@@ -27,6 +27,17 @@
   gap: 0.5rem;
 }
 
+.sidebar-user {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+}
+
+.sidebar-footer {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -313,6 +324,20 @@ textarea {
 
 .muted {
   color: #475569;
+}
+
+.login-layout {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(160deg, #0f172a, #111827);
+  padding: 1rem;
+}
+
+.login-card {
+  width: min(480px, 100%);
+  display: grid;
+  gap: 0.8rem;
 }
 
 .fade-in {

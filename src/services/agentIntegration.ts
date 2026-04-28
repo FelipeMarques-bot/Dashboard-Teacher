@@ -25,7 +25,7 @@ export type AgentIntegrationConfig = {
 
 export const defaultAgentConfig: AgentIntegrationConfig = {
   aiApiEnabled: false,
-  baseUrl: 'https://api.future-agent.local',
+  baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
   apiKeyConfigured: false,
   mode: 'mock',
 }

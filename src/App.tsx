@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import type { User } from 'firebase/auth'
 import './App.css'
 import {
   connectIntegration,
@@ -7,6 +8,12 @@ import {
   fetchDriveFiles,
   publishGrades,
 } from './services/agentIntegration'
+import {
+  isFirebaseConfigured,
+  observeAuthState,
+  signInWithGoogle,
+  signOutFromGoogle,
+} from './services/firebaseAuth'
 import type {
   AgentIntegrationConfig,
   DriveFile,
@@ -23,9 +30,16 @@ type Section =
   | 'Relatórios'
   | 'Configurações'
 
+type ClassItem = {
+  name: string
+  school: string
+  shift: string
+}
+
 type Student = {
   id: number
   name: string
+  className: string
   grades: number[]
   note: string
 }
@@ -43,6 +57,15 @@ type Holiday = {
   type: 'Nacional' | 'Estadual' | 'Municipal' | 'Pedagógica'
 }
 
+type Evaluation = {
+  id: number
+  name: string
+  className: string
+  school: string
+  date: string
+  status: 'Agendada'
+}
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -51,42 +74,6 @@ const navItems: { section: Section; icon: string }[] = [
   { section: 'Alunos', icon: '👥' },
   { section: 'Relatórios', icon: '📊' },
   { section: 'Configurações', icon: '⚙️' },
-]
-
-const weeklySchedule = [
-  { day: 'Segunda', time: '07:30 - 09:10', school: 'Escola Aurora', className: '7º A' },
-  { day: 'Terça', time: '10:00 - 11:40', school: 'Colégio Horizonte', className: '8º B' },
-  { day: 'Quarta', time: '13:30 - 15:10', school: 'Escola Aurora', className: '9º A' },
-  { day: 'Quinta', time: '08:20 - 10:00', school: 'Instituto Delta', className: '6º C' },
-  { day: 'Sexta', time: '11:00 - 12:40', school: 'Colégio Horizonte', className: '7º C' },
-]
-
-const alerts = [
-  { icon: '📝', text: 'Aplicação de avaliação em 2 dias', date: '28/04/2026', action: 'Ver avaliação' },
-  { icon: '🖨️', text: 'Enviar arquivo para impressão amanhã', date: '27/04/2026', action: 'Enviar agora' },
-  { icon: '📣', text: 'Reunião pedagógica na sexta-feira', date: '01/05/2026', action: 'Confirmar presença' },
-]
-
-const classesData = [
-  { name: '7º A', school: 'Escola Aurora', shift: 'Manhã', students: 32 },
-  { name: '8º B', school: 'Colégio Horizonte', shift: 'Manhã', students: 28 },
-  { name: '9º A', school: 'Escola Aurora', shift: 'Tarde', students: 30 },
-]
-
-const initialStudents: Student[] = [
-  { id: 1, name: 'Ana Souza', grades: [8.5, 7.2, 9.0], note: '' },
-  { id: 2, name: 'Bruno Lima', grades: [5.8, 6.1, 5.5], note: '' },
-  { id: 3, name: 'Carla Nunes', grades: [9.1, 8.9, 9.3], note: '' },
-]
-
-const initialHolidays: Holiday[] = [
-  { name: 'Tiradentes', date: '2026-04-21', type: 'Nacional' },
-  { name: 'Dia do Trabalho', date: '2026-05-01', type: 'Nacional' },
-]
-
-const evaluationsSeed = [
-  { name: 'Prova Bimestral Matemática', className: '7º A', school: 'Escola Aurora', date: '2026-05-03', status: 'Agendada' },
-  { name: 'Simulado Ciências', className: '8º B', school: 'Colégio Horizonte', date: '2026-05-05', status: 'Rascunho' },
 ]
 
 function formatDate(isoDate: string) {
@@ -176,10 +163,11 @@ function UploadPanel({
 
 function App() {
   const [activeSection, setActiveSection] = useState<Section>('Início')
-  const [activeClass, setActiveClass] = useState(classesData[0].name)
-  const [students, setStudents] = useState<Student[]>(initialStudents)
+  const [classes, setClasses] = useState<ClassItem[]>([])
+  const [activeClass, setActiveClass] = useState('')
+  const [students, setStudents] = useState<Student[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedItem[]>([])
-  const [holidays, setHolidays] = useState<Holiday[]>(initialHolidays)
+  const [holidays, setHolidays] = useState<Holiday[]>([])
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
   const [driveConnected, setDriveConnected] = useState(false)
   const [officialSystemConnected, setOfficialSystemConnected] = useState(false)
@@ -190,30 +178,32 @@ function App() {
   const [agentConfig, setAgentConfig] = useState<AgentIntegrationConfig>(
     defaultAgentConfig,
   )
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([])
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError] = useState('')
+
+  const [classForm, setClassForm] = useState({
+    name: '',
+    school: '',
+    shift: 'Manhã',
+  })
+
+  const [studentForm, setStudentForm] = useState({
+    name: '',
+    className: '',
+    note: '',
+  })
+
   const [evaluationForm, setEvaluationForm] = useState({
     name: '',
     description: '',
-    className: classesData[0].name,
-    school: classesData[0].school,
-    date: '2026-05-08',
+    className: '',
+    school: '',
+    date: '',
     warningDays: 2,
     printWarningDays: 1,
   })
-
-  const holidaySet = useMemo(
-    () => new Set(holidays.map((holiday) => holiday.date)),
-    [holidays],
-  )
-
-  const warningPreview = useMemo(() => {
-    const target = new Date(`${evaluationForm.date}T00:00:00`)
-    return subtractBusinessDays(target, evaluationForm.warningDays, holidaySet)
-  }, [evaluationForm.date, evaluationForm.warningDays, holidaySet])
-
-  const printWarningPreview = useMemo(() => {
-    const target = new Date(`${evaluationForm.date}T00:00:00`)
-    return subtractBusinessDays(target, evaluationForm.printWarningDays, holidaySet)
-  }, [evaluationForm.date, evaluationForm.printWarningDays, holidaySet])
 
   const [holidayForm, setHolidayForm] = useState({
     name: '',
@@ -221,13 +211,82 @@ function App() {
     type: 'Municipal' as Holiday['type'],
   })
 
+  useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setAuthLoading(false)
+      return
+    }
+
+    const unsubscribe = observeAuthState((authUser) => {
+      setUser(authUser)
+      setAuthLoading(false)
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
+  const holidaySet = useMemo(
+    () => new Set(holidays.map((holiday) => holiday.date)),
+    [holidays],
+  )
+
+  const warningPreview = useMemo(() => {
+    if (!evaluationForm.date) return null
+    const target = new Date(`${evaluationForm.date}T00:00:00`)
+    return subtractBusinessDays(target, evaluationForm.warningDays, holidaySet)
+  }, [evaluationForm.date, evaluationForm.warningDays, holidaySet])
+
+  const printWarningPreview = useMemo(() => {
+    if (!evaluationForm.date) return null
+    const target = new Date(`${evaluationForm.date}T00:00:00`)
+    return subtractBusinessDays(target, evaluationForm.printWarningDays, holidaySet)
+  }, [evaluationForm.date, evaluationForm.printWarningDays, holidaySet])
+
+  const studentsByActiveClass = useMemo(() => {
+    if (!activeClass) return students
+    return students.filter((student) => student.className === activeClass)
+  }, [activeClass, students])
+
+  const upcomingEvaluations = useMemo(() => {
+    const now = Date.now()
+    const inSevenDays = now + 7 * 24 * 60 * 60 * 1000
+
+    return evaluations.filter((evaluation) => {
+      const timestamp = new Date(`${evaluation.date}T00:00:00`).getTime()
+      return timestamp >= now && timestamp <= inSevenDays
+    })
+  }, [evaluations])
+
+  const monthDates = useMemo(() => {
+    const base = new Date()
+    const year = base.getFullYear()
+    const month = base.getMonth()
+    const totalDays = new Date(year, month + 1, 0).getDate()
+    const firstWeekDay = new Date(year, month, 1).getDay()
+
+    return Array.from({ length: firstWeekDay + totalDays }, (_, index) => {
+      if (index < firstWeekDay) return null
+      return index - firstWeekDay + 1
+    })
+  }, [])
+
+  const monthLabel = useMemo(
+    () => new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }),
+    [],
+  )
+
   const importStudentsFromRows = (rows: string[][]) => {
     if (rows.length === 0) return
+
+    const className = activeClass || studentForm.className || ''
 
     const importedStudents = rows
       .map((row, index) => ({
         id: Date.now() + index,
         name: row[0] || `Aluno importado ${index + 1}`,
+        className,
         grades: [0, 0, 0],
         note: row[1] || '',
       }))
@@ -296,6 +355,47 @@ function App() {
     )
   }
 
+  const addClass = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!classForm.name || !classForm.school) return
+
+    const newClass: ClassItem = {
+      name: classForm.name,
+      school: classForm.school,
+      shift: classForm.shift,
+    }
+
+    setClasses((prev) => [newClass, ...prev])
+    setClassForm({ name: '', school: '', shift: 'Manhã' })
+
+    if (!activeClass) {
+      setActiveClass(newClass.name)
+      setStudentForm((prev) => ({ ...prev, className: newClass.name }))
+      setEvaluationForm((prev) => ({
+        ...prev,
+        className: newClass.name,
+        school: newClass.school,
+      }))
+    }
+  }
+
+  const addStudent = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!studentForm.name) return
+
+    const className = studentForm.className || activeClass
+    const newStudent: Student = {
+      id: Date.now(),
+      name: studentForm.name,
+      className,
+      grades: [0, 0, 0],
+      note: studentForm.note,
+    }
+
+    setStudents((prev) => [newStudent, ...prev])
+    setStudentForm((prev) => ({ ...prev, name: '', note: '' }))
+  }
+
   const addHoliday = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!holidayForm.name || !holidayForm.date) return
@@ -308,18 +408,29 @@ function App() {
     setHolidayForm({ name: '', date: '', type: 'Municipal' })
   }
 
-  const monthDates = useMemo(() => {
-    const base = new Date('2026-05-01T00:00:00')
-    const year = base.getFullYear()
-    const month = base.getMonth()
-    const totalDays = new Date(year, month + 1, 0).getDate()
-    const firstWeekDay = new Date(year, month, 1).getDay()
+  const addEvaluation = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (
+      !evaluationForm.name ||
+      !evaluationForm.className ||
+      !evaluationForm.school ||
+      !evaluationForm.date
+    ) {
+      return
+    }
 
-    return Array.from({ length: firstWeekDay + totalDays }, (_, index) => {
-      if (index < firstWeekDay) return null
-      return index - firstWeekDay + 1
-    })
-  }, [])
+    const newEvaluation: Evaluation = {
+      id: Date.now(),
+      name: evaluationForm.name,
+      className: evaluationForm.className,
+      school: evaluationForm.school,
+      date: evaluationForm.date,
+      status: 'Agendada',
+    }
+
+    setEvaluations((prev) => [newEvaluation, ...prev])
+    setEvaluationForm((prev) => ({ ...prev, name: '', description: '', date: '' }))
+  }
 
   const connectProvider = async (provider: IntegrationProvider) => {
     try {
@@ -399,19 +510,44 @@ function App() {
       return
     }
 
+    if (!activeClass) {
+      setIntegrationMessage('Cadastre e selecione uma turma para publicar notas.')
+      return
+    }
+
     try {
       const newRecord = await publishGrades(agentConfig, {
         className: activeClass,
-        students: students.length,
+        students: studentsByActiveClass.length,
       })
       setPublicationRecords((prev) => [newRecord, ...prev])
       setIntegrationMessage(
-        `Notas da turma ${activeClass} publicadas para ${students.length} alunos.`,
+        `Notas da turma ${activeClass} publicadas para ${studentsByActiveClass.length} alunos.`,
       )
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Falha ao publicar notas.'
       setIntegrationMessage(message)
+    }
+  }
+
+  const handleSignIn = async () => {
+    try {
+      setAuthError('')
+      await signInWithGoogle()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha no login Google.'
+      setAuthError(message)
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      setAuthError('')
+      await signOutFromGoogle()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao sair da conta.'
+      setAuthError(message)
     }
   }
 
@@ -421,7 +557,7 @@ function App() {
         <>
           <div className="welcome card fade-in">
             <div>
-              <h2>Bem-vindo(a), Prof. Felipe</h2>
+              <h2>Bem-vindo(a), {user?.displayName || user?.email || 'Professor(a)'}</h2>
               <p className="muted">
                 {new Date().toLocaleDateString('pt-BR', {
                   weekday: 'long',
@@ -436,15 +572,15 @@ function App() {
           <div className="summary-grid fade-in">
             <article className="card summary-card">
               <p>Turmas ativas</p>
-              <strong>6</strong>
+              <strong>{classes.length}</strong>
             </article>
             <article className="card summary-card">
               <p>Avaliações na semana</p>
-              <strong>4</strong>
+              <strong>{upcomingEvaluations.length}</strong>
             </article>
             <article className="card summary-card">
               <p>Avisos pendentes</p>
-              <strong>3</strong>
+              <strong>{upcomingEvaluations.length}</strong>
             </article>
             <article className="card summary-card">
               <p>Total de alunos</p>
@@ -454,35 +590,39 @@ function App() {
 
           <div className="main-grid fade-in">
             <section className="card">
-              <h3>Calendário Semanal</h3>
-              <div className="schedule-list">
-                {weeklySchedule.map((item) => (
-                  <div key={`${item.day}${item.time}`} className="schedule-item">
-                    <span className="tag">{item.school}</span>
-                    <div>
-                      <strong>
-                        {item.day} • {item.time}
-                      </strong>
-                      <p className="muted">{item.className}</p>
+              <h3>Turmas cadastradas</h3>
+              {classes.length === 0 ? (
+                <p className="muted">Nenhuma turma cadastrada ainda.</p>
+              ) : (
+                <div className="schedule-list">
+                  {classes.map((item) => (
+                    <div key={`${item.name}-${item.school}`} className="schedule-item">
+                      <span className="tag">{item.school}</span>
+                      <div>
+                        <strong>{item.name}</strong>
+                        <p className="muted">Turno: {item.shift}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="card">
               <h3>Alertas e Notificações</h3>
-              <div className="alert-list">
-                {alerts.map((alert) => (
-                  <div key={alert.text} className="alert-item">
-                    <p>
-                      {alert.icon} {alert.text}
-                    </p>
-                    <small>{alert.date}</small>
-                    <button className="btn">{alert.action}</button>
-                  </div>
-                ))}
-              </div>
+              {upcomingEvaluations.length === 0 ? (
+                <p className="muted">Nenhum alerta pendente.</p>
+              ) : (
+                <div className="alert-list">
+                  {upcomingEvaluations.map((evaluation) => (
+                    <div key={evaluation.id} className="alert-item">
+                      <p>📝 {evaluation.name}</p>
+                      <small>{formatDate(evaluation.date)}</small>
+                      <button className="btn">Ver avaliação</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           </div>
         </>
@@ -490,14 +630,16 @@ function App() {
     }
 
     if (activeSection === 'Calendário') {
+      const year = new Date().getFullYear()
+      const month = new Date().getMonth() + 1
+
       return (
         <div className="two-column fade-in">
           <section className="card">
             <div className="section-heading">
-              <h3>Maio / 2026</h3>
+              <h3>{monthLabel}</h3>
               <div className="legend">
-                <span>🟦 Escola Aurora</span>
-                <span>🟩 Colégio Horizonte</span>
+                <span>🟦 Aula</span>
                 <span>🟥 Feriado/Parada</span>
               </div>
             </div>
@@ -507,7 +649,7 @@ function App() {
                   return <div key={`empty-${index}`} className="day muted" />
                 }
 
-                const iso = `2026-05-${String(day).padStart(2, '0')}`
+                const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
                 const holiday = holidays.find((item) => item.date === iso)
                 return (
                   <button
@@ -516,7 +658,7 @@ function App() {
                     onClick={() => setSelectedDay(day)}
                   >
                     <strong>{day}</strong>
-                    {holiday ? <small>{holiday.name}</small> : <small>Aulas</small>}
+                    {holiday ? <small>{holiday.name}</small> : <small>Sem evento</small>}
                   </button>
                 )
               })}
@@ -526,21 +668,9 @@ function App() {
           <section className="card">
             <h3>Detalhes do dia {selectedDay ? selectedDay : '-'}</h3>
             {selectedDay ? (
-              <div className="schedule-list">
-                {weeklySchedule
-                  .filter((item) => ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'].includes(item.day))
-                  .slice(0, 3)
-                  .map((lesson) => (
-                    <div key={`${lesson.day}${lesson.className}`} className="schedule-item">
-                      <span className="tag">{lesson.school}</span>
-                      <p>
-                        {lesson.className} • {lesson.time}
-                      </p>
-                    </div>
-                  ))}
-              </div>
+              <p className="muted">Cadastre avaliações e feriados para visualizar compromissos aqui.</p>
             ) : (
-              <p className="muted">Clique em um dia para abrir as aulas no painel lateral.</p>
+              <p className="muted">Clique em um dia para abrir os detalhes.</p>
             )}
 
             <form className="form" onSubmit={addHoliday}>
@@ -587,80 +717,161 @@ function App() {
     if (activeSection === 'Turmas') {
       return (
         <>
+          <div className="two-column fade-in">
+            <section className="card">
+              <h3>Nova turma</h3>
+              <form className="form" onSubmit={addClass}>
+                <input
+                  required
+                  placeholder="Nome da turma (ex.: 7º A)"
+                  value={classForm.name}
+                  onChange={(event) =>
+                    setClassForm((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                />
+                <input
+                  required
+                  placeholder="Escola"
+                  value={classForm.school}
+                  onChange={(event) =>
+                    setClassForm((prev) => ({ ...prev, school: event.target.value }))
+                  }
+                />
+                <select
+                  value={classForm.shift}
+                  onChange={(event) =>
+                    setClassForm((prev) => ({ ...prev, shift: event.target.value }))
+                  }
+                >
+                  <option>Manhã</option>
+                  <option>Tarde</option>
+                  <option>Noite</option>
+                </select>
+                <button className="btn btn-accent" type="submit">
+                  Adicionar turma
+                </button>
+              </form>
+            </section>
+
+            <section className="card">
+              <h3>Novo aluno</h3>
+              <form className="form" onSubmit={addStudent}>
+                <input
+                  required
+                  placeholder="Nome do aluno"
+                  value={studentForm.name}
+                  onChange={(event) =>
+                    setStudentForm((prev) => ({ ...prev, name: event.target.value }))
+                  }
+                />
+                <select
+                  value={studentForm.className}
+                  onChange={(event) =>
+                    setStudentForm((prev) => ({ ...prev, className: event.target.value }))
+                  }
+                  disabled={classes.length === 0}
+                >
+                  <option value="">Selecione a turma</option>
+                  {classes.map((classItem) => (
+                    <option key={`${classItem.name}-${classItem.school}`} value={classItem.name}>
+                      {classItem.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="Observação"
+                  value={studentForm.note}
+                  onChange={(event) =>
+                    setStudentForm((prev) => ({ ...prev, note: event.target.value }))
+                  }
+                />
+                <button className="btn btn-accent" type="submit" disabled={classes.length === 0}>
+                  Adicionar aluno
+                </button>
+              </form>
+            </section>
+          </div>
+
           <div className="cards-row fade-in">
-            {classesData.map((classItem) => (
-              <button
-                key={classItem.name}
-                className={`card class-card ${activeClass === classItem.name ? 'active-outline' : ''}`}
-                onClick={() => setActiveClass(classItem.name)}
-              >
-                <h3>{classItem.name}</h3>
-                <p className="muted">{classItem.school}</p>
-                <p>
-                  {classItem.shift} • {classItem.students} alunos
-                </p>
-              </button>
-            ))}
+            {classes.length === 0 ? (
+              <article className="card class-card">
+                <p className="muted">Cadastre uma turma para começar.</p>
+              </article>
+            ) : (
+              classes.map((classItem) => (
+                <button
+                  key={`${classItem.name}-${classItem.school}`}
+                  className={`card class-card ${activeClass === classItem.name ? 'active-outline' : ''}`}
+                  onClick={() => setActiveClass(classItem.name)}
+                >
+                  <h3>{classItem.name}</h3>
+                  <p className="muted">{classItem.school}</p>
+                  <p>{classItem.shift}</p>
+                </button>
+              ))
+            )}
           </div>
 
           <section className="card fade-in">
-            <h3>{activeClass} • Lançamento de notas</h3>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Aluno</th>
-                    <th>Avaliação 1</th>
-                    <th>Avaliação 2</th>
-                    <th>Avaliação 3</th>
-                    <th>Média</th>
-                    <th>Observações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students.map((student) => {
-                    const average =
-                      student.grades.reduce((sum, grade) => sum + grade, 0) /
-                      student.grades.length
-                    const statusClass = average >= 7 ? 'ok' : 'attention'
+            <h3>{activeClass || 'Sem turma selecionada'} • Lançamento de notas</h3>
+            {studentsByActiveClass.length === 0 ? (
+              <p className="muted">Nenhum aluno para a turma selecionada.</p>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Aluno</th>
+                      <th>Avaliação 1</th>
+                      <th>Avaliação 2</th>
+                      <th>Avaliação 3</th>
+                      <th>Média</th>
+                      <th>Observações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {studentsByActiveClass.map((student) => {
+                      const average =
+                        student.grades.reduce((sum, grade) => sum + grade, 0) /
+                        student.grades.length
+                      const statusClass = average >= 7 ? 'ok' : 'attention'
 
-                    return (
-                      <tr key={student.id}>
-                        <td>{student.name}</td>
-                        {student.grades.map((grade, index) => (
-                          <td key={`${student.id}-${index}`}>
+                      return (
+                        <tr key={student.id}>
+                          <td>{student.name}</td>
+                          {student.grades.map((grade, index) => (
+                            <td key={`${student.id}-${index}`}>
+                              <input
+                                type="number"
+                                min={0}
+                                max={10}
+                                step={0.1}
+                                value={grade}
+                                onChange={(event) =>
+                                  updateGrade(student.id, index, event.target.value)
+                                }
+                              />
+                            </td>
+                          ))}
+                          <td>
+                            <span className={`pill ${statusClass}`}>{average.toFixed(1)}</span>
+                          </td>
+                          <td>
                             <input
-                              type="number"
-                              min={0}
-                              max={10}
-                              step={0.1}
-                              value={grade}
+                              placeholder="Adicionar nota"
+                              value={student.note}
                               onChange={(event) =>
-                                updateGrade(student.id, index, event.target.value)
+                                updateNote(student.id, event.target.value)
                               }
                             />
                           </td>
-                        ))}
-                        <td>
-                          <span className={`pill ${statusClass}`}>
-                            {average.toFixed(1)}
-                          </span>
-                        </td>
-                        <td>
-                          <input
-                            placeholder="Adicionar nota"
-                            value={student.note}
-                            onChange={(event) =>
-                              updateNote(student.id, event.target.value)
-                            }
-                          />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </>
       )
@@ -671,25 +882,30 @@ function App() {
         <div className="two-column fade-in">
           <section className="card">
             <h3>Avaliações criadas</h3>
-            <div className="alert-list">
-              {evaluationsSeed.map((evaluation) => (
-                <div key={evaluation.name} className="alert-item">
-                  <strong>{evaluation.name}</strong>
-                  <p className="muted">
-                    {evaluation.className} • {evaluation.school}
-                  </p>
-                  <small>
-                    {formatDate(evaluation.date)} • {evaluation.status}
-                  </small>
-                </div>
-              ))}
-            </div>
+            {evaluations.length === 0 ? (
+              <p className="muted">Nenhuma avaliação cadastrada ainda.</p>
+            ) : (
+              <div className="alert-list">
+                {evaluations.map((evaluation) => (
+                  <div key={evaluation.id} className="alert-item">
+                    <strong>{evaluation.name}</strong>
+                    <p className="muted">
+                      {evaluation.className} • {evaluation.school}
+                    </p>
+                    <small>
+                      {formatDate(evaluation.date)} • {evaluation.status}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="card">
             <h3>Nova avaliação</h3>
-            <form className="form">
+            <form className="form" onSubmit={addEvaluation}>
               <input
+                required
                 placeholder="Nome da avaliação"
                 value={evaluationForm.name}
                 onChange={(event) =>
@@ -707,21 +923,38 @@ function App() {
                 }
               />
               <select
+                required
                 value={evaluationForm.className}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const selectedClass = classes.find(
+                    (classItem) => classItem.name === event.target.value,
+                  )
+
                   setEvaluationForm((prev) => ({
                     ...prev,
                     className: event.target.value,
+                    school: selectedClass?.school ?? prev.school,
                   }))
-                }
+                }}
+                disabled={classes.length === 0}
               >
-                {classesData.map((classItem) => (
-                  <option key={classItem.name} value={classItem.name}>
+                <option value="">Selecione a turma</option>
+                {classes.map((classItem) => (
+                  <option key={`${classItem.name}-${classItem.school}`} value={classItem.name}>
                     {classItem.name}
                   </option>
                 ))}
               </select>
               <input
+                required
+                placeholder="Escola"
+                value={evaluationForm.school}
+                onChange={(event) =>
+                  setEvaluationForm((prev) => ({ ...prev, school: event.target.value }))
+                }
+              />
+              <input
+                required
                 type="date"
                 value={evaluationForm.date}
                 onChange={(event) =>
@@ -754,11 +987,15 @@ function App() {
                 }
                 placeholder="Dias antes da impressão"
               />
-              <p className="muted">
-                Aviso da avaliação: {warningPreview.toLocaleDateString('pt-BR')} • Aviso de
-                impressão: {printWarningPreview.toLocaleDateString('pt-BR')}
-              </p>
-              <button className="btn btn-accent" type="button">
+              {warningPreview && printWarningPreview ? (
+                <p className="muted">
+                  Aviso da avaliação: {warningPreview.toLocaleDateString('pt-BR')} • Aviso de
+                  impressão: {printWarningPreview.toLocaleDateString('pt-BR')}
+                </p>
+              ) : (
+                <p className="muted">Defina a data da avaliação para calcular os avisos.</p>
+              )}
+              <button className="btn btn-accent" type="submit" disabled={classes.length === 0}>
                 Salvar avaliação
               </button>
             </form>
@@ -777,35 +1014,52 @@ function App() {
           />
           <section className="card">
             <h3>Alunos cadastrados</h3>
-            <div className="student-list">
-              {students.map((student) => (
-                <div key={student.id} className="student-item">
-                  <strong>{student.name}</strong>
-                  <p className="muted">{student.note || 'Sem observações'}</p>
-                </div>
-              ))}
-            </div>
+            {students.length === 0 ? (
+              <p className="muted">Nenhum aluno cadastrado ainda.</p>
+            ) : (
+              <div className="student-list">
+                {students.map((student) => (
+                  <div key={student.id} className="student-item">
+                    <strong>{student.name}</strong>
+                    <p className="muted">
+                      Turma: {student.className || 'Não definida'} •{' '}
+                      {student.note || 'Sem observações'}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </div>
       )
     }
 
     if (activeSection === 'Relatórios') {
+      const allAverages = students.map(
+        (student) =>
+          student.grades.reduce((sum, grade) => sum + grade, 0) / student.grades.length,
+      )
+      const average =
+        allAverages.length > 0
+          ? allAverages.reduce((sum, value) => sum + value, 0) / allAverages.length
+          : 0
+      const studentsInAttention = allAverages.filter((value) => value < 7).length
+
       return (
         <section className="card fade-in">
           <h3>Relatórios rápidos</h3>
           <div className="summary-grid">
             <article className="summary-card">
               <p>Média geral da turma</p>
-              <strong>7.3</strong>
+              <strong>{average.toFixed(1)}</strong>
             </article>
             <article className="summary-card">
               <p>Alunos em atenção</p>
-              <strong>6</strong>
+              <strong>{studentsInAttention}</strong>
             </article>
             <article className="summary-card">
               <p>Atividades pendentes</p>
-              <strong>11</strong>
+              <strong>{upcomingEvaluations.length}</strong>
             </article>
           </div>
         </section>
@@ -901,7 +1155,7 @@ function App() {
             </div>
 
             <div className="form integration-config">
-              <h4>Configuração futura da API de IA</h4>
+              <h4>Configuração da API</h4>
               <select
                 value={agentConfig.mode}
                 onChange={(event) =>
@@ -912,7 +1166,7 @@ function App() {
                 }
               >
                 <option value="mock">Modo simulado (atual)</option>
-                <option value="api">Modo API (futuro)</option>
+                <option value="api">Modo API</option>
               </select>
               <input
                 placeholder="Base URL da API"
@@ -972,21 +1226,11 @@ function App() {
           </section>
         </div>
 
-        <div className="two-column">
-          <section className="card">
-            <h3>Cadastro de escolas</h3>
-            <form className="form">
-              <input placeholder="Nome da escola" />
-              <input placeholder="Endereço" />
-              <input placeholder="Turnos de funcionamento" />
-              <button className="btn btn-accent" type="button">
-                Adicionar escola
-              </button>
-            </form>
-          </section>
-
-          <section className="card">
-            <h3>Feriados manuais</h3>
+        <section className="card">
+          <h3>Feriados manuais</h3>
+          {holidays.length === 0 ? (
+            <p className="muted">Nenhum feriado cadastrado.</p>
+          ) : (
             <div className="alert-list">
               {holidays.map((holiday) => (
                 <div key={`${holiday.name}-${holiday.date}`} className="alert-item">
@@ -996,8 +1240,41 @@ function App() {
                 </div>
               ))}
             </div>
-          </section>
-        </div>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  if (authLoading) {
+    return (
+      <div className="login-layout">
+        <section className="card login-card">
+          <h2>Carregando sessão...</h2>
+        </section>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="login-layout">
+        <section className="card login-card">
+          <h1>Teacher Hub</h1>
+          <p className="muted">
+            Entre com Google para acessar o dashboard e começar com dados limpos.
+          </p>
+          <button className="btn btn-accent" type="button" onClick={() => void handleSignIn()}>
+            Entrar com Google
+          </button>
+          {!isFirebaseConfigured && (
+            <p className="muted">
+              Firebase não configurado. Defina as variáveis VITE_FIREBASE_* no Render ou no
+              arquivo .env.local.
+            </p>
+          )}
+          {authError && <p className="muted">{authError}</p>}
+        </section>
       </div>
     )
   }
@@ -1006,6 +1283,7 @@ function App() {
     <div className="layout">
       <aside className="sidebar">
         <h1>Teacher Hub</h1>
+        <p className="muted sidebar-user">{user.displayName || user.email}</p>
         <nav>
           {navItems.map((item) => (
             <button
@@ -1018,6 +1296,12 @@ function App() {
             </button>
           ))}
         </nav>
+        <div className="sidebar-footer">
+          <button className="btn" type="button" onClick={() => void handleSignOut()}>
+            Sair
+          </button>
+          {authError && <p className="muted">{authError}</p>}
+        </div>
       </aside>
 
       <main className="content">{renderContent()}</main>
