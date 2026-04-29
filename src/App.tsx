@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { User } from 'firebase/auth'
+import readXlsxFile from 'read-excel-file/browser'
 import './App.css'
 import {
   connectIntegration,
@@ -83,6 +84,109 @@ function parseCsv(content: string) {
     .map((line) => line.split(',').map((cell) => cell.trim()))
 }
 
+function normalizeCellValue(value: unknown) {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return String(value).trim()
+}
+
+function extractStudentsFromSheet(rows: string[][], sheetName: string) {
+  if (rows.length === 0) return []
+
+  const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
+  const normalizedHeaderValues = ['aluno', 'nome', 'nome aluno']
+  const ignoredStudentValues = new Set(['', 'aluno', 'nome', 'nome aluno'])
+
+  const headerRowIndex = normalizedRows.findIndex((row) =>
+    row.some((cell) =>
+      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola'].includes(
+        normalizeHeader(cell),
+      ),
+    ),
+  )
+
+  if (headerRowIndex >= 0) {
+    const headerRow = normalizedRows[headerRowIndex]
+    const normalizedHeaders = headerRow.map((value) => normalizeHeader(value))
+    const studentHeaderColumns = normalizedHeaders.reduce<number[]>((acc, value, index) => {
+      if (normalizedHeaderValues.includes(value)) {
+        acc.push(index)
+      }
+      return acc
+    }, [])
+
+    const schoolIndex = normalizedHeaders.findIndex((value) => value === 'escola')
+    const classIndex = normalizedHeaders.findIndex(
+      (value) => value === 'turma' || value === 'classe',
+    )
+    const studentIndex = normalizedHeaders.findIndex((value) =>
+      normalizedHeaderValues.includes(value),
+    )
+    const noteIndex = normalizedHeaders.findIndex(
+      (value) => value === 'observacao' || value === 'obs',
+    )
+
+    const isTabular =
+      schoolIndex >= 0 || classIndex >= 0 || studentHeaderColumns.length <= 1
+
+    if (isTabular && studentIndex >= 0) {
+      const extracted = normalizedRows
+        .slice(headerRowIndex + 1)
+        .map((row) => {
+          const student = row[studentIndex]?.trim() ?? ''
+          const className = classIndex >= 0 ? row[classIndex]?.trim() ?? '' : ''
+          const school = schoolIndex >= 0 ? row[schoolIndex]?.trim() ?? '' : sheetName
+          const note = noteIndex >= 0 ? row[noteIndex]?.trim() ?? '' : ''
+          return [school, className, student, note]
+        })
+        .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+
+      if (extracted.length > 0) {
+        return extracted
+      }
+    }
+
+    const extractedByBlocks: string[][] = []
+    const uniqueRows = new Set<string>()
+
+    studentHeaderColumns.forEach((columnIndex) => {
+      let className = ''
+      for (let rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
+        const candidate = normalizedRows[rowIndex]?.[columnIndex]?.trim() ?? ''
+        const normalizedCandidate = normalizeHeader(candidate)
+        if (!candidate || ignoredStudentValues.has(normalizedCandidate)) continue
+        className = candidate.replace(/^turma\s*/i, '').trim() || candidate
+        break
+      }
+
+      normalizedRows.slice(headerRowIndex + 1).forEach((row) => {
+        const student = row[columnIndex]?.trim() ?? ''
+        const normalizedStudent = normalizeHeader(student)
+        if (ignoredStudentValues.has(normalizedStudent)) return
+        const uniqueKey = JSON.stringify([sheetName, className, student])
+        if (uniqueRows.has(uniqueKey)) return
+        uniqueRows.add(uniqueKey)
+        extractedByBlocks.push([sheetName, className, student, ''])
+      })
+    })
+
+    if (extractedByBlocks.length > 0) {
+      return extractedByBlocks
+    }
+  }
+
+  return normalizedRows
+    .map((row) => {
+      const hasSchoolAndClassColumns = row.length >= 3
+      const school = hasSchoolAndClassColumns ? row[0] ?? '' : sheetName
+      const className = hasSchoolAndClassColumns ? row[1] ?? '' : ''
+      const student = hasSchoolAndClassColumns ? row[2] ?? '' : row[0] ?? ''
+      const note = hasSchoolAndClassColumns ? row[3] ?? '' : row[1] ?? ''
+      return [school, className, student, note]
+    })
+    .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+}
+
 function normalizeHeader(value: string) {
   return value
     .toLowerCase()
@@ -103,8 +207,8 @@ function UploadPanel({
   title,
   items,
   onUpload,
-  accept = '.csv,application/pdf',
-  actionLabel = 'Subir CSV/PDF',
+  accept = '.csv,.xlsx,application/pdf',
+  actionLabel = 'Subir CSV/XLSX/PDF',
 }: {
   title: string
   items: UploadedItem[]
@@ -337,18 +441,20 @@ function App() {
     [],
   )
 
-  const importStudentsFromRows = (rows: string[][]) => {
+  const importStudentsFromRows = (rows: string[][], fallbackSchoolFromSource?: string) => {
     if (rows.length === 0) return
 
     const headers = rows[0].map((value) => normalizeHeader(value))
     const hasHeader = headers.some((value) =>
-      ['aluno', 'nome', 'turma', 'classe', 'escola', 'observacao', 'obs'].includes(value),
+      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola', 'observacao', 'obs'].includes(
+        value,
+      ),
     )
 
     const getIndex = (options: string[]) => headers.findIndex((header) => options.includes(header))
     const schoolIndex = getIndex(['escola'])
     const classIndex = getIndex(['turma', 'classe'])
-    const studentIndex = getIndex(['aluno', 'nome'])
+    const studentIndex = getIndex(['aluno', 'nome', 'nome aluno'])
     const noteIndex = getIndex(['observacao', 'obs'])
     const dataRows = hasHeader ? rows.slice(1) : rows
     const fallbackClassName = activeClass || studentForm.className
@@ -374,7 +480,7 @@ function App() {
         noteIndex >= 0 ? row[noteIndex] : hasSchoolAndClassColumns ? row[3] || '' : row[1] || ''
 
       const className = inferredClassName || fallbackClassName
-      const school = inferredSchool || 'Escola não informada'
+      const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
 
       if (!inferredStudentName || !className) {
         return
@@ -410,7 +516,7 @@ function App() {
       return
     }
 
-    setIntegrationMessage('Nenhum aluno válido encontrado no CSV.')
+    setIntegrationMessage('Nenhum aluno válido encontrado no arquivo.')
   }
 
   const importHolidaysFromRows = (rows: string[][]) => {
@@ -450,36 +556,66 @@ function App() {
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files) return
+    try {
+      const parsedFiles = await Promise.all(
+        Array.from(files).map(async (file) => {
+          const lowerName = file.name.toLowerCase()
+          const isCsv = lowerName.endsWith('.csv')
+          const isXlsx = lowerName.endsWith('.xlsx')
 
-    const parsedFiles = await Promise.all(
-      Array.from(files).map(async (file) => {
-        const isCsv = file.name.toLowerCase().endsWith('.csv')
-        if (isCsv) {
-          const text = await file.text()
-          const rows = parseCsv(text)
+          if (isCsv) {
+            const text = await file.text()
+            const rows = parseCsv(text)
+            return {
+              name: file.name,
+              type: 'CSV' as const,
+              size: fileSizeLabel(file.size),
+              rows,
+            }
+          }
+
+          if (isXlsx) {
+            const workbookSheets = await readXlsxFile(file)
+            const rowsBySheet = workbookSheets.map((sheet) => {
+              const normalizedRows = sheet.data.map((row: unknown[]) =>
+                row.map(normalizeCellValue),
+              )
+              return extractStudentsFromSheet(normalizedRows, sheet.sheet)
+            })
+
+            return {
+              name: file.name,
+              type: 'XLSX' as const,
+              size: fileSizeLabel(file.size),
+              rows: rowsBySheet.flat(),
+            }
+          }
+
           return {
             name: file.name,
-            type: 'CSV' as const,
+            type: 'PDF' as const,
             size: fileSizeLabel(file.size),
-            rows,
           }
-        }
+        }),
+      )
 
-        return {
-          name: file.name,
-          type: 'PDF' as const,
-          size: fileSizeLabel(file.size),
-        }
-      }),
-    )
+      setUploadedFiles((prev) => [...parsedFiles, ...prev])
 
-    setUploadedFiles((prev) => [...parsedFiles, ...prev])
+      const importRows = parsedFiles
+        .filter((file) => (file.type === 'CSV' || file.type === 'XLSX') && file.rows)
+        .flatMap((file) => file.rows ?? [])
 
-    const csvRows = parsedFiles
-      .filter((file) => file.type === 'CSV' && file.rows && file.rows.length > 0)
-      .flatMap((file) => file.rows ?? [])
+      if (importRows.length === 0) {
+        setIntegrationMessage('Nenhum aluno válido encontrado no arquivo.')
+        return
+      }
 
-    importStudentsFromRows(csvRows)
+      importStudentsFromRows(importRows)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao processar o arquivo enviado.'
+      setIntegrationMessage(message)
+    }
   }
 
   const handleHolidayFileUpload = async (files: FileList | null) => {

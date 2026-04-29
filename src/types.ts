@@ -14,7 +14,7 @@ export type Student = {
 
 export type UploadedItem = {
   name: string
-  type: 'CSV' | 'PDF'
+  type: 'CSV' | 'XLSX' | 'PDF'
   size: string
   rows?: string[][]
 }

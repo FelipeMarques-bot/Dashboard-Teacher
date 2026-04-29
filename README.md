@@ -1,6 +1,6 @@
 # Dashboard-Teacher
 
-Dashboard de gestão escolar com autenticação Google, importação CSV e persistência de dados no backend.
+Dashboard de gestão escolar com autenticação Google, importação CSV/XLSX e persistência de dados no backend.
 
 ## Execução local
 
@@ -19,7 +19,7 @@ npm run build
 
 ## Recursos atuais
 
-- Importação de alunos via CSV (suporta colunas de escola, turma, aluno e observação).
+- Importação de alunos via CSV/XLSX (suporta múltiplas abas no XLSX e colunas de escola, turma, aluno e observação).
 - Importação de feriados/paradas pedagógicas via CSV.
 - Persistência automática de turmas, alunos, avaliações, feriados e histórico no backend.
 
@@ -57,27 +57,75 @@ DATABASE_SSL=true
 
 ## Deploy no Render (recomendado)
 
-### 1) Backend (Web Service)
+### 1) Criar PostgreSQL no Render
 
-- Build Command: `npm install`
-- Start Command: `npm run start`
-- Environment:
-  - `DATABASE_URL` do Render PostgreSQL
-  - `DATABASE_SSL=true`
-  - `PORT=3000`
+- [ ] New + > **PostgreSQL**
+- [ ] Nome: `dashboard-teacher-db` (ou outro)
+- [ ] Plano/região conforme necessidade
+- [ ] Após criar, copie:
+  - [ ] **Internal Database URL** (para `DATABASE_URL` no backend)
+  - [ ] **External Database URL** (opcional, para acesso externo)
 
-### 2) Frontend (Static Site)
+### 2) Criar backend (Web Service)
 
-- Build Command: `npm ci && npm run build`
-- Publish Directory: `dist`
-- Environment:
-  - todas variáveis `VITE_FIREBASE_*`
-  - `VITE_API_BASE_URL` apontando para URL pública do backend Render
+- [ ] New + > **Web Service**
+- [ ] Conectar este repositório
+- [ ] Root Directory: *(vazio)*
+- [ ] Runtime: **Node**
+- [ ] Build Command:
+  ```bash
+  npm install
+  ```
+- [ ] Start Command:
+  ```bash
+  npm run start
+  ```
+- [ ] Environment Variables (copiar e colar):
+  ```env
+  PORT=3000
+  DATABASE_URL=<INTERNAL_DATABASE_URL_DO_POSTGRES_RENDER>
+  DATABASE_SSL=true
+  ```
+- [ ] Deploy do serviço
+- [ ] Copiar URL pública do backend (ex.: `https://dashboard-teacher-api.onrender.com`)
 
-### 3) Rewrite SPA
+### 3) Criar frontend (Static Site)
 
-1. Render > Static Site > **Settings** > **Redirects and Rewrites**.
-2. Adicione regra:
-   - **Source:** `/*`
-   - **Destination:** `/index.html`
-   - **Action:** `Rewrite`
+- [ ] New + > **Static Site**
+- [ ] Conectar este repositório
+- [ ] Root Directory: *(vazio)*
+- [ ] Build Command:
+  ```bash
+  npm ci && npm run build
+  ```
+- [ ] Publish Directory:
+  ```bash
+  dist
+  ```
+- [ ] Environment Variables (copiar e colar):
+  ```env
+  VITE_FIREBASE_API_KEY=<SUA_FIREBASE_API_KEY>
+  VITE_FIREBASE_AUTH_DOMAIN=<SEU_PROJECT_ID>.firebaseapp.com
+  VITE_FIREBASE_PROJECT_ID=<SEU_PROJECT_ID>
+  VITE_FIREBASE_STORAGE_BUCKET=<SEU_PROJECT_ID>.appspot.com
+  VITE_FIREBASE_MESSAGING_SENDER_ID=<SEU_MESSAGING_SENDER_ID>
+  VITE_FIREBASE_APP_ID=<SEU_FIREBASE_APP_ID>
+  VITE_API_BASE_URL=https://<URL_PUBLICA_DO_BACKEND_RENDER>
+  ```
+- [ ] Deploy do site estático
+
+### 4) Configurar rewrite SPA no Static Site
+
+- [ ] Render > Static Site > **Settings** > **Redirects and Rewrites**
+- [ ] Adicionar regra:
+  - **Source:** `/*`
+  - **Destination:** `/index.html`
+  - **Action:** `Rewrite`
+
+### 5) Checklist final de validação
+
+- [ ] Abrir frontend publicado no Render
+- [ ] Fazer login Google
+- [ ] Importar planilha XLSX com múltiplas abas
+- [ ] Confirmar criação de turmas/alunos por aba
+- [ ] Criar avaliação e recarregar a página para validar persistência
