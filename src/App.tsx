@@ -39,6 +39,7 @@ type Section =
 
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 const AUTO_SAVE_DEBOUNCE_MS = 500
+const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
 
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
@@ -94,8 +95,8 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
   if (rows.length === 0) return []
 
   const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
-  const normalizedHeaderValues = ['aluno', 'nome', 'nome aluno']
-  const ignoredStudentValues = new Set(['', 'aluno', 'nome', 'nome aluno'])
+  const studentHeaderValueSet = new Set<string>(STUDENT_HEADER_VALUES)
+  const ignoredStudentValues = new Set<string>(['', ...STUDENT_HEADER_VALUES])
 
   const headerRowIndex = normalizedRows.findIndex((row) =>
     row.some((cell) =>
@@ -109,7 +110,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
     const headerRow = normalizedRows[headerRowIndex]
     const normalizedHeaders = headerRow.map((value) => normalizeHeader(value))
     const studentHeaderColumns = normalizedHeaders.reduce<number[]>((acc, value, index) => {
-      if (normalizedHeaderValues.includes(value)) {
+      if (studentHeaderValueSet.has(value)) {
         acc.push(index)
       }
       return acc
@@ -119,9 +120,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
     const classIndex = normalizedHeaders.findIndex(
       (value) => value === 'turma' || value === 'classe',
     )
-    const studentIndex = normalizedHeaders.findIndex((value) =>
-      normalizedHeaderValues.includes(value),
-    )
+    const studentIndex = normalizedHeaders.findIndex((value) => studentHeaderValueSet.has(value))
     const noteIndex = normalizedHeaders.findIndex(
       (value) => value === 'observacao' || value === 'obs',
     )
@@ -575,8 +574,8 @@ function App() {
           }
 
           if (isXlsx) {
-            const workbookSheets = await readXlsxFile(file)
-            const rowsBySheet = workbookSheets.map((sheet) => {
+            const sheets = await readXlsxFile(file)
+            const extractedStudentsBySheet = sheets.map((sheet) => {
               const normalizedRows = sheet.data.map((row: unknown[]) =>
                 row.map(normalizeCellValue),
               )
@@ -587,7 +586,7 @@ function App() {
               name: file.name,
               type: 'XLSX' as const,
               size: fileSizeLabel(file.size),
-              rows: rowsBySheet.flat(),
+              rows: extractedStudentsBySheet.flat(),
             }
           }
 
