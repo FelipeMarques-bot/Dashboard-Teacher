@@ -78,6 +78,45 @@ function isLikelyStudentName(value: string) {
   return onlyDigitsAndMarks.length > 0
 }
 
+function isLikelyMetadataCell(value: string) {
+  const normalized = normalizeHeader(value)
+  if (!normalized) return true
+
+  return (
+    normalized.includes('escola') ||
+    normalized.includes('turma') ||
+    normalized.includes('serie') ||
+    normalized.includes('ano') ||
+    normalized.includes('disciplina') ||
+    normalized.includes('professor') ||
+    normalized.includes('nota') ||
+    normalized.includes('media') ||
+    normalized.includes('total') ||
+    normalized.includes('bimestre') ||
+    normalized.includes('trimestre')
+  )
+}
+
+function findLikelyStudentColumn(row: string[]) {
+  const preferredStartIndex = row.length >= 3 ? 2 : 0
+
+  for (let index = preferredStartIndex; index < row.length; index += 1) {
+    const value = row[index]?.trim() ?? ''
+    if (isLikelyStudentName(value) && !isLikelyMetadataCell(value)) {
+      return index
+    }
+  }
+
+  for (let index = 0; index < preferredStartIndex; index += 1) {
+    const value = row[index]?.trim() ?? ''
+    if (isLikelyStudentName(value) && !isLikelyMetadataCell(value)) {
+      return index
+    }
+  }
+
+  return -1
+}
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -208,10 +247,15 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
   return normalizedRows
     .map((row) => {
       const hasSchoolAndClassColumns = row.length >= 3
+      const detectedStudentIndex = findLikelyStudentColumn(row)
+      const fallbackStudentIndex = hasSchoolAndClassColumns ? 2 : 0
+      const studentIndex = detectedStudentIndex >= 0 ? detectedStudentIndex : fallbackStudentIndex
       const school = hasSchoolAndClassColumns ? row[0] ?? '' : sheetName
       const className = hasSchoolAndClassColumns ? row[1] ?? '' : ''
-      const student = hasSchoolAndClassColumns ? row[2] ?? '' : row[0] ?? ''
-      const note = hasSchoolAndClassColumns ? row[3] ?? '' : row[1] ?? ''
+      const student = row[studentIndex] ?? ''
+      const note = hasSchoolAndClassColumns
+        ? row[3] ?? row[studentIndex + 1] ?? ''
+        : row[studentIndex + 1] ?? row[1] ?? ''
       return [school, className, student, note]
     })
     .filter((row) => !isIgnoredStudentValue(row[2]))
