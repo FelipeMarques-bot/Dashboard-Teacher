@@ -41,6 +41,24 @@ const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 const AUTO_SAVE_DEBOUNCE_MS = 500
 const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
 
+function isStudentHeader(value: string) {
+  const normalized = normalizeHeader(value)
+  return (
+    STUDENT_HEADER_VALUES.includes(normalized as (typeof STUDENT_HEADER_VALUES)[number]) ||
+    (normalized.includes('nome') &&
+      (normalized.includes('aluno') || normalized.includes('estudante')))
+  )
+}
+
+function isClassHeader(value: string) {
+  const normalized = normalizeHeader(value)
+  return normalized === 'turma' || normalized === 'classe'
+}
+
+function isSchoolHeader(value: string) {
+  return normalizeHeader(value) === 'escola'
+}
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -95,14 +113,11 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
   if (rows.length === 0) return []
 
   const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
-  const studentHeaderValueSet = new Set<string>(STUDENT_HEADER_VALUES)
-  const ignoredStudentValues = new Set<string>(['', ...STUDENT_HEADER_VALUES])
+  const ignoredStudentValues = new Set<string>(['', ...STUDENT_HEADER_VALUES, 'nome do aluno'])
 
   const headerRowIndex = normalizedRows.findIndex((row) =>
     row.some((cell) =>
-      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola'].includes(
-        normalizeHeader(cell),
-      ),
+      isStudentHeader(cell) || isClassHeader(cell) || isSchoolHeader(cell),
     ),
   )
 
@@ -110,17 +125,15 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
     const headerRow = normalizedRows[headerRowIndex]
     const normalizedHeaders = headerRow.map((value) => normalizeHeader(value))
     const studentHeaderColumns = normalizedHeaders.reduce<number[]>((acc, value, index) => {
-      if (studentHeaderValueSet.has(value)) {
+      if (isStudentHeader(value)) {
         acc.push(index)
       }
       return acc
     }, [])
 
-    const schoolIndex = normalizedHeaders.findIndex((value) => value === 'escola')
-    const classIndex = normalizedHeaders.findIndex(
-      (value) => value === 'turma' || value === 'classe',
-    )
-    const studentIndex = normalizedHeaders.findIndex((value) => studentHeaderValueSet.has(value))
+    const schoolIndex = normalizedHeaders.findIndex((value) => isSchoolHeader(value))
+    const classIndex = normalizedHeaders.findIndex((value) => isClassHeader(value))
+    const studentIndex = normalizedHeaders.findIndex((value) => isStudentHeader(value))
     const noteIndex = normalizedHeaders.findIndex(
       (value) => value === 'observacao' || value === 'obs',
     )
@@ -447,16 +460,16 @@ function App() {
 
     const headers = rows[0].map((value) => normalizeHeader(value))
     const hasHeader = headers.some((value) =>
-      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola', 'observacao', 'obs'].includes(
-        value,
-      ),
+      isStudentHeader(value) ||
+      isClassHeader(value) ||
+      isSchoolHeader(value) ||
+      ['observacao', 'obs'].includes(value),
     )
 
-    const getIndex = (options: string[]) => headers.findIndex((header) => options.includes(header))
-    const schoolIndex = getIndex(['escola'])
-    const classIndex = getIndex(['turma', 'classe'])
-    const studentIndex = getIndex(['aluno', 'nome', 'nome aluno'])
-    const noteIndex = getIndex(['observacao', 'obs'])
+    const schoolIndex = headers.findIndex((header) => isSchoolHeader(header))
+    const classIndex = headers.findIndex((header) => isClassHeader(header))
+    const studentIndex = headers.findIndex((header) => isStudentHeader(header))
+    const noteIndex = headers.findIndex((header) => ['observacao', 'obs'].includes(header))
     const dataRows = hasHeader ? rows.slice(1) : rows
     const fallbackClassName = activeClass || studentForm.className
     const existingClassKeys = new Set(
