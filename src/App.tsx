@@ -624,16 +624,16 @@ function App() {
 
     dataRows.forEach((row, index) => {
       const hasSchoolAndClassColumns = row.length >= 3
+      const detectedStudentIndex = studentIndex >= 0 ? studentIndex : findLikelyStudentColumn(row)
+      const fallbackStudentIndex = hasSchoolAndClassColumns ? 2 : 0
+      const resolvedStudentIndex =
+        detectedStudentIndex >= 0 ? detectedStudentIndex : fallbackStudentIndex
+
       const inferredSchool =
         schoolIndex >= 0 ? row[schoolIndex]?.trim() : hasSchoolAndClassColumns ? row[0]?.trim() : ''
       const inferredClassName =
         classIndex >= 0 ? row[classIndex]?.trim() : hasSchoolAndClassColumns ? row[1]?.trim() : ''
-      const inferredStudentName =
-        studentIndex >= 0
-          ? row[studentIndex]?.trim()
-          : hasSchoolAndClassColumns
-            ? row[2]?.trim()
-            : row[0]?.trim()
+      let inferredStudentName = row[resolvedStudentIndex]?.trim() ?? ''
       const inferredNote =
         noteIndex >= 0
           ? row[noteIndex]?.trim()
@@ -641,13 +641,21 @@ function App() {
             ? row[3]?.trim() || ''
             : row[1]?.trim() || ''
 
+      if (!isLikelyStudentName(inferredStudentName)) {
+        const fallbackStudentName = row.find((cell) => {
+          const value = cell?.trim() ?? ''
+          return isLikelyStudentName(value) && !isLikelyMetadataCell(value)
+        })
+        inferredStudentName = fallbackStudentName?.trim() ?? ''
+      }
+
       const className =
         inferredClassName.trim() ||
         fallbackClassName.trim() ||
         DEFAULT_MISSING_CLASS_NAME
       const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
 
-      if (!isLikelyStudentName(inferredStudentName || '')) {
+      if (!isLikelyStudentName(inferredStudentName)) {
         return
       }
 
