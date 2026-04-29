@@ -53,12 +53,25 @@ function isStudentHeader(value: string) {
 
 function isIgnoredStudentValue(value: string) {
   const normalized = normalizeHeader(value)
-  return normalized === '' || isStudentHeader(normalized)
+  return normalized === '' || isStudentHeader(normalized) || isClassLabelValue(normalized)
 }
 
 function isClassHeader(value: string) {
   const normalized = normalizeHeader(value)
   return normalized === 'turma' || normalized === 'classe'
+}
+
+function isClassLabelValue(value: string) {
+  const normalized = normalizeHeader(value)
+  if (!normalized) return false
+  if (isClassHeader(normalized) || normalized.includes('turma')) return true
+
+  const hasGradeIndicator = /(?:^|\s)[6-9]\s*(?:o|º)?(?:\s|$)/.test(normalized)
+  const hasShiftIndicator = /(manha|tarde|noite|vesp|matut|noturn)/.test(normalized)
+  const hasClassSuffix = /(?:^|\s)[6-9]\s*(?:o|º)?\s*[a-z](?:\s|$)/.test(normalized)
+  const hasYearKeyword = normalized.includes('ano')
+
+  return (hasGradeIndicator && (hasYearKeyword || hasShiftIndicator)) || hasClassSuffix
 }
 
 function isSchoolHeader(value: string) {
@@ -81,6 +94,7 @@ function isLikelyStudentName(value: string) {
 function isLikelyMetadataCell(value: string) {
   const normalized = normalizeHeader(value)
   if (!normalized) return true
+  if (isClassLabelValue(normalized)) return true
 
   return (
     normalized.includes('escola') ||
@@ -253,8 +267,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
       (value) => value === 'observacao' || value === 'obs',
     )
 
-    const isTabular =
-      schoolIndex >= 0 || classIndex >= 0 || studentHeaderColumns.length <= 1
+    const isTabular = schoolIndex >= 0 || classIndex >= 0 || studentHeaderColumns.length === 0
 
     if (isTabular && studentIndex >= 0) {
       const extracted = normalizedRows
@@ -278,18 +291,25 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
     const uniqueRows = new Set<string>()
 
     studentHeaderColumns.forEach((columnIndex) => {
-      let className = ''
+      let defaultClassName = ''
       for (let rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
         const candidate = normalizedRows[rowIndex]?.[columnIndex]?.trim() ?? ''
         if (isIgnoredStudentValue(candidate)) continue
-        className = sanitizeClassLabel(candidate)
+        defaultClassName = sanitizeClassLabel(candidate)
         break
       }
 
+      let currentClassName = defaultClassName
       normalizedRows.slice(headerRowIndex + 1).forEach((row) => {
+        const currentCell = row[columnIndex]?.trim() ?? ''
+        if (isClassLabelValue(currentCell) && !isStudentHeader(currentCell)) {
+          currentClassName = sanitizeClassLabel(currentCell)
+          return
+        }
+
         const student = row[columnIndex]?.trim() ?? ''
         if (isIgnoredStudentValue(student)) return
-        const resolvedClassName = className || sheetName
+        const resolvedClassName = currentClassName || defaultClassName || sheetName
         const uniqueKey = JSON.stringify([sheetName, resolvedClassName, student])
         if (uniqueRows.has(uniqueKey)) return
         uniqueRows.add(uniqueKey)
