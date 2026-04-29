@@ -40,7 +40,7 @@ type Section =
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 const AUTO_SAVE_DEBOUNCE_MS = 500
 const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
-const FALLBACK_CLASS_NAME = 'Turma não informada'
+const DEFAULT_MISSING_CLASS_NAME = 'Turma não informada'
 
 function isStudentHeader(value: string) {
   const normalized = normalizeHeader(value)
@@ -513,7 +513,10 @@ function App() {
             ? row[3]?.trim() || ''
             : row[1]?.trim() || ''
 
-      const className = inferredClassName || fallbackClassName || FALLBACK_CLASS_NAME
+      const className =
+        inferredClassName.trim() ||
+        fallbackClassName.trim() ||
+        DEFAULT_MISSING_CLASS_NAME
       const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
 
       if (!isLikelyStudentName(inferredStudentName || '')) {
