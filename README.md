@@ -67,7 +67,7 @@ npm install
    VITE_API_BASE_URL=http://localhost:3000
    ```
 3. Preencha o `.env.local` com suas credenciais do Firebase.
-4. Não defina `DATABASE_URL` para usar banco interno em arquivo.
+4. Deixe `DATABASE_URL` indefinida (não adicione essa variável no arquivo) para usar banco interno em arquivo.
 
 ### 5) Subir frontend + backend juntos (modo desenvolvimento)
 
@@ -78,6 +78,9 @@ npm run dev:local
 - Frontend: `http://localhost:5173`
 - Backend/API: `http://localhost:3000`
 - Healthcheck: `http://localhost:3000/api/health` (deve retornar `"storage":"file"`)
+
+> Observação de segurança: o script local usa `--host 0.0.0.0` para facilitar acesso em rede local.
+> Em redes não confiáveis, prefira executar em ambiente isolado/firewall ou ajuste para `localhost`.
 
 ### 6) Subir localmente em modo produção
 
@@ -95,12 +98,12 @@ npm run start:local
 
 1. Abra **Agendador de Tarefas** > **Criar Tarefa**.
 2. Aba **Gatilhos**: adicione **Ao iniciar sessão**.
-3. Aba **Ações**:  
+3. Aba **Ações** (recomendado para uso contínuo: `start:local`; use `dev:local` apenas para desenvolvimento):
    - Programa/script: `C:\Windows\System32\cmd.exe`  
    - Argumentos:
-     ```bat
-     /c cd /d "C:\projetos\Dashboard-Teacher" && npm run dev:local
-     ```
+      ```bat
+     /c cd /d "C:\projetos\Dashboard-Teacher" && npm run start:local
+      ```
 4. Salve e teste deslogando/logando novamente.
 
 ### Linux (systemd --user)
@@ -111,7 +114,7 @@ npm run start:local
    Description=Dashboard Teacher local stack
 
    [Service]
-   WorkingDirectory=/home/user/projetos/Dashboard-Teacher
+   WorkingDirectory=/home/<seu-usuario>/projetos/Dashboard-Teacher
    ExecStart=/usr/bin/npm run dev:local
    Restart=always
    Environment=PATH=/usr/bin:/usr/local/bin
