@@ -2,30 +2,76 @@
 
 Dashboard de gestão escolar com autenticação Google, importação CSV/XLSX e persistência no backend.
 
-## Rodar localmente com banco interno (sem Render)
+## Rodar localmente no Windows (sem Render, com banco interno)
 
 > O backend usa banco interno em arquivo local quando **DATABASE_URL não estiver definida**.  
 > Arquivo local: `server/data/state.json`.
 
-### 1) Instalar dependências
+### 1) Instalar pré-requisitos
 
-```bash
+- Git: https://git-scm.com/download/win
+- Node.js LTS: https://nodejs.org
+
+Depois de instalar o Node.js, **feche e abra novamente** o PowerShell.
+
+Valide:
+
+```powershell
+git --version
+node -v
+npm -v
+```
+
+> Se `npm` não for reconhecido: reinstale o Node.js LTS marcando a opção de adicionar ao PATH e abra um novo terminal.
+
+### 2) Clonar o projeto
+
+```powershell
+cd C:\
+mkdir projetos
+cd projetos
+git clone https://github.com/FelipeMarques-bot/Dashboard-Teacher.git
+cd Dashboard-Teacher
+```
+
+### 3) Instalar dependências do projeto
+
+```powershell
 npm install
 ```
 
-### 2) Configurar variáveis locais
+### 4) Configurar variáveis locais
 
-1. Copie os arquivos de exemplo:
-   ```bash
-   cp .env.local.example .env.local
-   cp .env.api.example .env.api
+1. Se os exemplos existirem:
+   ```powershell
+   copy .env.local.example .env.local
+   copy .env.api.example .env.api
    ```
-2. Preencha o `.env.local` com suas credenciais do Firebase.
-3. Mantenha o `.env.api` apenas com `PORT=3000` (não defina `DATABASE_URL` para usar banco interno).
+2. Se os exemplos **não** existirem, crie manualmente:
+   ```powershell
+   New-Item .env.local -ItemType File
+   New-Item .env.api -ItemType File
+   ```
+   `.env.api`:
+   ```dotenv
+   PORT=3000
+   ```
+   `.env.local`:
+   ```dotenv
+   VITE_FIREBASE_API_KEY=
+   VITE_FIREBASE_AUTH_DOMAIN=
+   VITE_FIREBASE_PROJECT_ID=
+   VITE_FIREBASE_STORAGE_BUCKET=
+   VITE_FIREBASE_MESSAGING_SENDER_ID=
+   VITE_FIREBASE_APP_ID=
+   VITE_API_BASE_URL=http://localhost:3000
+   ```
+3. Preencha o `.env.local` com suas credenciais do Firebase.
+4. Não defina `DATABASE_URL` para usar banco interno em arquivo.
 
-### 3) Subir frontend + backend juntos (modo desenvolvimento)
+### 5) Subir frontend + backend juntos (modo desenvolvimento)
 
-```bash
+```powershell
 npm run dev:local
 ```
 
@@ -33,9 +79,9 @@ npm run dev:local
 - Backend/API: `http://localhost:3000`
 - Healthcheck: `http://localhost:3000/api/health` (deve retornar `"storage":"file"`)
 
-### 4) Subir localmente em modo produção
+### 6) Subir localmente em modo produção
 
-```bash
+```powershell
 npm run build
 npm run start:local
 ```
