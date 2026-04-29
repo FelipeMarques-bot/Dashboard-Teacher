@@ -23,6 +23,22 @@ npm -v
 ```
 
 > Se `npm` não for reconhecido: reinstale o Node.js LTS marcando a opção de adicionar ao PATH e abra um novo terminal.
+>
+> Se aparecer erro de segurança do `npm.ps1` (Execution Policy), use uma destas opções:
+> - **Temporário (apenas sessão atual):**
+>   ```powershell
+>   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+>   npm -v
+>   ```
+> - **Persistente para seu usuário (recomendado):**
+>   ```powershell
+>   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+>   npm -v
+>   ```
+> - **Sem alterar política (fallback imediato):**
+>   ```powershell
+>   npm.cmd -v
+>   ```
 
 ### 2) Clonar o projeto
 
@@ -38,6 +54,12 @@ cd Dashboard-Teacher
 
 ```powershell
 npm install
+```
+
+Se o PowerShell ainda bloquear `npm`, execute:
+
+```powershell
+npm.cmd install
 ```
 
 ### 4) Configurar variáveis locais
@@ -73,6 +95,12 @@ npm install
 
 ```powershell
 npm run dev:local
+```
+
+Se necessário:
+
+```powershell
+npm.cmd run dev:local
 ```
 
 - Frontend: `http://localhost:5173`
