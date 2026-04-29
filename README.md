@@ -99,7 +99,7 @@ npm run start:local
    - Programa/script: `C:\Windows\System32\cmd.exe`  
    - Argumentos:
      ```bat
-     /c cd /d "C:\caminho\Dashboard-Teacher" && npm run dev:local
+     /c cd /d "C:\projetos\Dashboard-Teacher" && npm run dev:local
      ```
 4. Salve e teste deslogando/logando novamente.
 
@@ -111,7 +111,7 @@ npm run start:local
    Description=Dashboard Teacher local stack
 
    [Service]
-   WorkingDirectory=/caminho/Dashboard-Teacher
+   WorkingDirectory=/home/user/projetos/Dashboard-Teacher
    ExecStart=/usr/bin/npm run dev:local
    Restart=always
    Environment=PATH=/usr/bin:/usr/local/bin
