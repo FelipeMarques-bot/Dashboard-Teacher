@@ -5,14 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "node server/index.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/index.mjs"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "firebase": "^12.12.1",
+    "pg": "^8.16.3",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "read-excel-file": "^9.0.6"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

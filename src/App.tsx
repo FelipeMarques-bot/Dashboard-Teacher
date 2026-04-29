@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { User } from 'firebase/auth'
+import readXlsxFile from 'read-excel-file/browser'
 import './App.css'
 import {
   connectIntegration,
@@ -8,6 +9,11 @@ import {
   fetchDriveFiles,
   publishGrades,
 } from './services/agentIntegration'
+import {
+  loadAppState,
+  saveAppState,
+  type PersistedState,
+} from './services/appStateApi'
 import {
   isFirebaseConfigured,
   observeAuthState,
@@ -20,6 +26,7 @@ import type {
   IntegrationProvider,
   PublicationRecord,
 } from './services/agentIntegration'
+import type { ClassItem, Evaluation, Holiday, Student, UploadedItem } from './types'
 
 type Section =
   | 'Início'
@@ -30,43 +37,9 @@ type Section =
   | 'Relatórios'
   | 'Configurações'
 
-type ClassItem = {
-  name: string
-  school: string
-  shift: string
-}
-
-type Student = {
-  id: number
-  name: string
-  className: string
-  grades: number[]
-  note: string
-}
-
-type UploadedItem = {
-  name: string
-  type: 'CSV' | 'PDF'
-  size: string
-  rows?: string[][]
-}
-
-type Holiday = {
-  name: string
-  date: string
-  type: 'Nacional' | 'Estadual' | 'Municipal' | 'Pedagógica'
-}
-
-type Evaluation = {
-  id: number
-  name: string
-  className: string
-  school: string
-  date: string
-  status: 'Agendada'
-}
-
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
+const AUTO_SAVE_DEBOUNCE_MS = 500
+const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
 
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
@@ -112,28 +85,149 @@ function parseCsv(content: string) {
     .map((line) => line.split(',').map((cell) => cell.trim()))
 }
 
+function normalizeCellValue(value: unknown) {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString().slice(0, 10)
+  return String(value).trim()
+}
+
+function extractStudentsFromSheet(rows: string[][], sheetName: string) {
+  if (rows.length === 0) return []
+
+  const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
+  const studentHeaderValueSet = new Set<string>(STUDENT_HEADER_VALUES)
+  const ignoredStudentValues = new Set<string>(['', ...STUDENT_HEADER_VALUES])
+
+  const headerRowIndex = normalizedRows.findIndex((row) =>
+    row.some((cell) =>
+      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola'].includes(
+        normalizeHeader(cell),
+      ),
+    ),
+  )
+
+  if (headerRowIndex >= 0) {
+    const headerRow = normalizedRows[headerRowIndex]
+    const normalizedHeaders = headerRow.map((value) => normalizeHeader(value))
+    const studentHeaderColumns = normalizedHeaders.reduce<number[]>((acc, value, index) => {
+      if (studentHeaderValueSet.has(value)) {
+        acc.push(index)
+      }
+      return acc
+    }, [])
+
+    const schoolIndex = normalizedHeaders.findIndex((value) => value === 'escola')
+    const classIndex = normalizedHeaders.findIndex(
+      (value) => value === 'turma' || value === 'classe',
+    )
+    const studentIndex = normalizedHeaders.findIndex((value) => studentHeaderValueSet.has(value))
+    const noteIndex = normalizedHeaders.findIndex(
+      (value) => value === 'observacao' || value === 'obs',
+    )
+
+    const isTabular =
+      schoolIndex >= 0 || classIndex >= 0 || studentHeaderColumns.length <= 1
+
+    if (isTabular && studentIndex >= 0) {
+      const extracted = normalizedRows
+        .slice(headerRowIndex + 1)
+        .map((row) => {
+          const student = row[studentIndex]?.trim() ?? ''
+          const className = classIndex >= 0 ? row[classIndex]?.trim() ?? '' : ''
+          const school = schoolIndex >= 0 ? row[schoolIndex]?.trim() ?? '' : sheetName
+          const note = noteIndex >= 0 ? row[noteIndex]?.trim() ?? '' : ''
+          return [school, className, student, note]
+        })
+        .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+
+      if (extracted.length > 0) {
+        return extracted
+      }
+    }
+
+    const extractedByBlocks: string[][] = []
+    const uniqueRows = new Set<string>()
+
+    studentHeaderColumns.forEach((columnIndex) => {
+      let className = ''
+      for (let rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
+        const candidate = normalizedRows[rowIndex]?.[columnIndex]?.trim() ?? ''
+        const normalizedCandidate = normalizeHeader(candidate)
+        if (!candidate || ignoredStudentValues.has(normalizedCandidate)) continue
+        className = candidate.replace(/^turma\s*/i, '').trim() || candidate
+        break
+      }
+
+      normalizedRows.slice(headerRowIndex + 1).forEach((row) => {
+        const student = row[columnIndex]?.trim() ?? ''
+        const normalizedStudent = normalizeHeader(student)
+        if (ignoredStudentValues.has(normalizedStudent)) return
+        const uniqueKey = JSON.stringify([sheetName, className, student])
+        if (uniqueRows.has(uniqueKey)) return
+        uniqueRows.add(uniqueKey)
+        extractedByBlocks.push([sheetName, className, student, ''])
+      })
+    })
+
+    if (extractedByBlocks.length > 0) {
+      return extractedByBlocks
+    }
+  }
+
+  return normalizedRows
+    .map((row) => {
+      const hasSchoolAndClassColumns = row.length >= 3
+      const school = hasSchoolAndClassColumns ? row[0] ?? '' : sheetName
+      const className = hasSchoolAndClassColumns ? row[1] ?? '' : ''
+      const student = hasSchoolAndClassColumns ? row[2] ?? '' : row[0] ?? ''
+      const note = hasSchoolAndClassColumns ? row[3] ?? '' : row[1] ?? ''
+      return [school, className, student, note]
+    })
+    .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+}
+
+function normalizeHeader(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim()
+}
+
+function getHolidayType(value: string): Holiday['type'] {
+  const normalized = normalizeHeader(value)
+  if (normalized.includes('estadual')) return 'Estadual'
+  if (normalized.includes('municipal')) return 'Municipal'
+  if (normalized.includes('pedagog')) return 'Pedagógica'
+  return 'Nacional'
+}
+
 function UploadPanel({
   title,
   items,
   onUpload,
+  accept = '.csv,.xlsx,application/pdf',
+  actionLabel = 'Subir CSV/XLSX/PDF',
 }: {
   title: string
   items: UploadedItem[]
   onUpload: (files: FileList | null) => Promise<void>
+  accept?: string
+  actionLabel?: string
 }) {
   return (
     <div className="card">
       <div className="section-heading">
         <h3>{title}</h3>
         <label className="btn btn-accent" htmlFor={title}>
-          Subir CSV/PDF
+          {actionLabel}
         </label>
       </div>
       <input
         id={title}
         className="hidden-input"
         type="file"
-        accept=".csv,application/pdf"
+        accept={accept}
         multiple
         onChange={(event) => {
           void onUpload(event.target.files)
@@ -169,6 +263,7 @@ function App() {
   const [activeClass, setActiveClass] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedItem[]>([])
+  const [calendarUploadedFiles, setCalendarUploadedFiles] = useState<UploadedItem[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
   const [driveConnected, setDriveConnected] = useState(false)
@@ -177,14 +272,13 @@ function App() {
   const [selectedDriveFileId, setSelectedDriveFileId] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [publicationRecords, setPublicationRecords] = useState<PublicationRecord[]>([])
-  const [agentConfig, setAgentConfig] = useState<AgentIntegrationConfig>(
-    defaultAgentConfig,
-  )
+  const agentConfig: AgentIntegrationConfig = defaultAgentConfig
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(isFirebaseConfigured)
   const [authError, setAuthError] = useState('')
   const [dashboardLoadTime] = useState(() => Date.now())
+  const [isStateReady, setIsStateReady] = useState(false)
 
   const [classForm, setClassForm] = useState({
     name: '',
@@ -228,6 +322,74 @@ function App() {
       unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void loadAppState()
+      .then((state) => {
+        if (cancelled) return
+        setClasses(state.classes)
+        setActiveClass(state.activeClass)
+        setStudents(state.students)
+        setUploadedFiles(state.uploadedFiles)
+        setCalendarUploadedFiles(state.calendarUploadedFiles)
+        setHolidays(state.holidays)
+        setEvaluations(state.evaluations)
+        setPublicationRecords(state.publicationRecords)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        const message =
+          error instanceof Error ? error.message : 'Falha ao carregar estado salvo.'
+        setIntegrationMessage(message)
+      })
+      .finally(() => {
+        if (cancelled) return
+        setIsStateReady(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isStateReady) return
+
+    const state: PersistedState = {
+      classes,
+      activeClass,
+      students,
+      uploadedFiles,
+      calendarUploadedFiles,
+      holidays,
+      evaluations,
+      publicationRecords,
+    }
+
+    const timer = window.setTimeout(() => {
+      void saveAppState(state).catch((error) => {
+        const message =
+          error instanceof Error ? error.message : 'Falha ao salvar estado no servidor.'
+        setIntegrationMessage(message)
+      })
+    }, AUTO_SAVE_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [
+    isStateReady,
+    classes,
+    activeClass,
+    students,
+    uploadedFiles,
+    calendarUploadedFiles,
+    holidays,
+    evaluations,
+    publicationRecords,
+  ])
 
   const holidaySet = useMemo(
     () => new Set(holidays.map((holiday) => holiday.date)),
@@ -278,62 +440,243 @@ function App() {
     [],
   )
 
-  const importStudentsFromRows = (rows: string[][]) => {
+  const importStudentsFromRows = (rows: string[][], fallbackSchoolFromSource?: string) => {
     if (rows.length === 0) return
 
-    const className = activeClass || studentForm.className
-    if (!className) {
-      setIntegrationMessage('Selecione ou cadastre uma turma antes de importar alunos.')
-      return
-    }
+    const headers = rows[0].map((value) => normalizeHeader(value))
+    const hasHeader = headers.some((value) =>
+      ['aluno', 'nome', 'nome aluno', 'turma', 'classe', 'escola', 'observacao', 'obs'].includes(
+        value,
+      ),
+    )
 
-    const importedStudents = rows
-      .map((row, index) => ({
+    const getIndex = (options: string[]) => headers.findIndex((header) => options.includes(header))
+    const schoolIndex = getIndex(['escola'])
+    const classIndex = getIndex(['turma', 'classe'])
+    const studentIndex = getIndex(['aluno', 'nome', 'nome aluno'])
+    const noteIndex = getIndex(['observacao', 'obs'])
+    const dataRows = hasHeader ? rows.slice(1) : rows
+    const fallbackClassName = activeClass || studentForm.className
+    const existingClassKeys = new Set(
+      classes.map((item) => JSON.stringify([item.school, item.name])),
+    )
+    const importedClasses: ClassItem[] = []
+    const importedStudents: Student[] = []
+
+    dataRows.forEach((row, index) => {
+      const hasSchoolAndClassColumns = row.length >= 3
+      const inferredSchool =
+        schoolIndex >= 0 ? row[schoolIndex] : hasSchoolAndClassColumns ? row[0] : ''
+      const inferredClassName =
+        classIndex >= 0 ? row[classIndex] : hasSchoolAndClassColumns ? row[1] : ''
+      const inferredStudentName =
+        studentIndex >= 0
+          ? row[studentIndex]
+          : hasSchoolAndClassColumns
+            ? row[2]
+            : row[0]
+      const inferredNote =
+        noteIndex >= 0 ? row[noteIndex] : hasSchoolAndClassColumns ? row[3] || '' : row[1] || ''
+
+      const className = inferredClassName || fallbackClassName
+      const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
+
+      if (!inferredStudentName || !className) {
+        return
+      }
+
+      const classKey = JSON.stringify([school, className])
+      if (!existingClassKeys.has(classKey)) {
+        existingClassKeys.add(classKey)
+        importedClasses.push({ name: className, school, shift: 'Manhã' })
+      }
+
+      importedStudents.push({
         id: Date.now() + index,
-        name: row[0] || `Aluno importado ${index + 1}`,
+        name: inferredStudentName,
         className,
         grades: [0, 0, 0],
-        note: row[1] || '',
-      }))
-      .filter((student) => student.name.trim().length > 0)
+        note: inferredNote || '',
+      })
+    })
+
+    if (importedClasses.length > 0) {
+      setClasses((prev) => [...importedClasses, ...prev])
+      if (!activeClass) {
+        setActiveClass(importedClasses[0].name)
+      }
+    }
 
     if (importedStudents.length > 0) {
       setStudents((prev) => [...prev, ...importedStudents])
+      setIntegrationMessage(
+        `${importedStudents.length} aluno(s) importado(s) e ${importedClasses.length} turma(s) organizada(s).`,
+      )
+      return
     }
+
+    setIntegrationMessage('Nenhum aluno válido encontrado no arquivo.')
+  }
+
+  const parseHolidaysFromRows = (rows: string[][]) => {
+    if (rows.length === 0) return [] as Holiday[]
+    const headers = rows[0].map((value) => normalizeHeader(value))
+    const hasHeader = headers.some((value) =>
+      ['data', 'dia', 'nome', 'evento', 'tipo'].includes(value),
+    )
+    const dateIndex = headers.findIndex((value) => value === 'data' || value === 'dia')
+    const nameIndex = headers.findIndex((value) => value === 'nome' || value === 'evento')
+    const typeIndex = headers.findIndex((value) => value === 'tipo')
+    const dataRows = hasHeader ? rows.slice(1) : rows
+    const imported: Holiday[] = []
+
+    dataRows.forEach((row) => {
+      const date = (dateIndex >= 0 ? row[dateIndex] : row[0])?.trim()
+      const name = (nameIndex >= 0 ? row[nameIndex] : row[1])?.trim()
+      const rawType = (typeIndex >= 0 ? row[typeIndex] : row[2])?.trim() ?? 'Nacional'
+      if (!date || !name) return
+
+      imported.push({
+        date,
+        name,
+        type: getHolidayType(rawType),
+      })
+    })
+
+    return imported
   }
 
   const handleFileUpload = async (files: FileList | null) => {
     if (!files) return
+    try {
+      const parsedFiles = await Promise.all(
+        Array.from(files).map(async (file) => {
+          const lowerName = file.name.toLowerCase()
+          const isCsv = lowerName.endsWith('.csv')
+          const isXlsx = lowerName.endsWith('.xlsx')
 
-    const parsedFiles = await Promise.all(
-      Array.from(files).map(async (file) => {
-        const isCsv = file.name.toLowerCase().endsWith('.csv')
-        if (isCsv) {
-          const text = await file.text()
-          const rows = parseCsv(text)
+          if (isCsv) {
+            const text = await file.text()
+            const rows = parseCsv(text)
+            return {
+              name: file.name,
+              type: 'CSV' as const,
+              size: fileSizeLabel(file.size),
+              rows,
+            }
+          }
+
+          if (isXlsx) {
+            const sheets = await readXlsxFile(file)
+            const extractedStudentsBySheet = sheets.map((sheet) => {
+              const normalizedRows = sheet.data.map((row: unknown[]) =>
+                row.map(normalizeCellValue),
+              )
+              return extractStudentsFromSheet(normalizedRows, sheet.sheet)
+            })
+
+            return {
+              name: file.name,
+              type: 'XLSX' as const,
+              size: fileSizeLabel(file.size),
+              rows: extractedStudentsBySheet.flat(),
+            }
+          }
+
           return {
             name: file.name,
-            type: 'CSV' as const,
+            type: 'PDF' as const,
             size: fileSizeLabel(file.size),
-            rows,
           }
-        }
+        }),
+      )
 
-        return {
-          name: file.name,
-          type: 'PDF' as const,
-          size: fileSizeLabel(file.size),
-        }
-      }),
-    )
+      setUploadedFiles((prev) => [...parsedFiles, ...prev])
 
-    setUploadedFiles((prev) => [...parsedFiles, ...prev])
+      const importRows = parsedFiles
+        .filter((file) => (file.type === 'CSV' || file.type === 'XLSX') && file.rows)
+        .flatMap((file) => file.rows ?? [])
 
-    const csvRows = parsedFiles
-      .filter((file) => file.type === 'CSV' && file.rows && file.rows.length > 0)
-      .flatMap((file) => file.rows ?? [])
+      if (importRows.length === 0) {
+        setIntegrationMessage('Nenhum aluno válido encontrado no arquivo.')
+        return
+      }
 
-    importStudentsFromRows(csvRows)
+      importStudentsFromRows(importRows)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao processar o arquivo enviado.'
+      setIntegrationMessage(message)
+    }
+  }
+
+  const handleHolidayFileUpload = async (files: FileList | null) => {
+    if (!files) return
+    try {
+      const parsedFiles = await Promise.all(
+        Array.from(files).map(async (file) => {
+          const lowerName = file.name.toLowerCase()
+          const isCsv = lowerName.endsWith('.csv')
+          const isXlsx = lowerName.endsWith('.xlsx')
+
+          if (isCsv) {
+            const text = await file.text()
+            const rows = parseCsv(text)
+            return {
+              name: file.name,
+              type: 'CSV' as const,
+              size: fileSizeLabel(file.size),
+              rows,
+              holidays: parseHolidaysFromRows(rows),
+            }
+          }
+
+          if (isXlsx) {
+            const sheets = await readXlsxFile(file)
+            const rowsBySheet = sheets.map((sheet) =>
+              sheet.data.map((row: unknown[]) => row.map(normalizeCellValue)),
+            )
+            const importedHolidays = rowsBySheet.flatMap((rows) => parseHolidaysFromRows(rows))
+
+            return {
+              name: file.name,
+              type: 'XLSX' as const,
+              size: fileSizeLabel(file.size),
+              rows: rowsBySheet.flat(),
+              holidays: importedHolidays,
+            }
+          }
+
+          return {
+            name: file.name,
+            type: 'PDF' as const,
+            size: fileSizeLabel(file.size),
+            holidays: [] as Holiday[],
+          }
+        }),
+      )
+
+      const uploadItems = parsedFiles.map((file) => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        rows: file.rows,
+      }))
+      setCalendarUploadedFiles((prev) => [...uploadItems, ...prev])
+
+      const importedHolidays = parsedFiles.flatMap((file) => file.holidays)
+      if (importedHolidays.length > 0) {
+        setHolidays((prev) => [...importedHolidays, ...prev])
+        setIntegrationMessage(`${importedHolidays.length} feriado(s)/parada(s) importado(s).`)
+        return
+      }
+
+      setIntegrationMessage('Nenhum feriado válido encontrado no arquivo.')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao processar o arquivo enviado.'
+      setIntegrationMessage(message)
+    }
   }
 
   const updateGrade = (studentId: number, gradeIndex: number, value: string) => {
@@ -681,6 +1024,14 @@ function App() {
             ) : (
               <p className="muted">Clique em um dia para abrir os detalhes.</p>
             )}
+
+            <UploadPanel
+              title="Importação de feriados e paradas pedagógicas"
+              items={calendarUploadedFiles}
+              onUpload={handleHolidayFileUpload}
+              accept=".csv,.xlsx"
+              actionLabel="Subir CSV/XLSX de feriados"
+            />
 
             <form className="form" onSubmit={addHoliday}>
               <h4>Adicionar feriado/evento</h4>
@@ -1164,52 +1515,37 @@ function App() {
             </div>
 
             <div className="form integration-config">
-              <h4>Configuração da API</h4>
-              <select
-                value={agentConfig.mode}
-                onChange={(event) =>
-                  setAgentConfig((prev) => ({
-                    ...prev,
-                    mode: event.target.value as AgentIntegrationConfig['mode'],
-                  }))
-                }
+              <h4>Persistência e sincronização</h4>
+              <p className="muted">
+                O sistema salva automaticamente turmas, alunos, avaliações e feriados no backend.
+              </p>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  const state: PersistedState = {
+                    classes,
+                    activeClass,
+                    students,
+                    uploadedFiles,
+                    calendarUploadedFiles,
+                    holidays,
+                    evaluations,
+                    publicationRecords,
+                  }
+                  void saveAppState(state)
+                    .then(() => setIntegrationMessage('Dados sincronizados com sucesso.'))
+                    .catch((error) => {
+                      const message =
+                        error instanceof Error
+                          ? error.message
+                          : 'Falha ao sincronizar dados manualmente.'
+                      setIntegrationMessage(message)
+                    })
+                }}
               >
-                <option value="mock">Modo simulado (atual)</option>
-                <option value="api">Modo API</option>
-              </select>
-              <input
-                placeholder="Base URL da API"
-                value={agentConfig.baseUrl}
-                onChange={(event) =>
-                  setAgentConfig((prev) => ({ ...prev, baseUrl: event.target.value }))
-                }
-              />
-              <label className="checkbox-line">
-                <input
-                  type="checkbox"
-                  checked={agentConfig.aiApiEnabled}
-                  onChange={(event) =>
-                    setAgentConfig((prev) => ({
-                      ...prev,
-                      aiApiEnabled: event.target.checked,
-                    }))
-                  }
-                />
-                Ativar agente por API de IA
-              </label>
-              <label className="checkbox-line">
-                <input
-                  type="checkbox"
-                  checked={agentConfig.apiKeyConfigured}
-                  onChange={(event) =>
-                    setAgentConfig((prev) => ({
-                      ...prev,
-                      apiKeyConfigured: event.target.checked,
-                    }))
-                  }
-                />
-                Chave de API configurada
-              </label>
+                Sincronizar agora
+              </button>
             </div>
 
             <p className="muted">{integrationMessage || 'Sem operações recentes.'}</p>
