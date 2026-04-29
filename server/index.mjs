@@ -19,6 +19,7 @@ const defaultState = {
   activeClass: '',
   students: [],
   uploadedFiles: [],
+  calendarUploadedFiles: [],
   holidays: [],
   evaluations: [],
   publicationRecords: [],
@@ -33,6 +34,9 @@ function sanitizeState(value) {
     activeClass: typeof next.activeClass === 'string' ? next.activeClass : '',
     students: Array.isArray(next.students) ? next.students : [],
     uploadedFiles: Array.isArray(next.uploadedFiles) ? next.uploadedFiles : [],
+    calendarUploadedFiles: Array.isArray(next.calendarUploadedFiles)
+      ? next.calendarUploadedFiles
+      : [],
     holidays: Array.isArray(next.holidays) ? next.holidays : [],
     evaluations: Array.isArray(next.evaluations) ? next.evaluations : [],
     publicationRecords: Array.isArray(next.publicationRecords)
@@ -43,10 +47,11 @@ function sanitizeState(value) {
 
 const usePostgres = Boolean(process.env.DATABASE_URL)
 const sslEnabled = process.env.DATABASE_SSL !== 'false'
+const sslRejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false'
 const pgPool = usePostgres
   ? new pg.Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: sslEnabled ? { rejectUnauthorized: false } : false,
+      ssl: sslEnabled ? { rejectUnauthorized: sslRejectUnauthorized } : false,
     })
   : null
 
@@ -66,7 +71,17 @@ async function readFallbackState() {
   try {
     const content = await fs.readFile(fallbackDataPath, 'utf-8')
     return sanitizeState(JSON.parse(content))
-  } catch {
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return defaultState
+    }
+
+    console.error(error)
     return defaultState
   }
 }
@@ -122,6 +137,7 @@ app.get('/api/state', async (_req, res) => {
     const state = await readState()
     res.json(state)
   } catch (error) {
+    console.error(error)
     res.status(500).json({ message: 'Falha ao carregar estado.' })
   }
 })
@@ -130,7 +146,8 @@ app.put('/api/state', async (req, res) => {
   try {
     const state = await writeState(req.body)
     res.json(state)
-  } catch {
+  } catch (error) {
+    console.error(error)
     res.status(500).json({ message: 'Falha ao salvar estado.' })
   }
 })

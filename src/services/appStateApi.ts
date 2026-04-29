@@ -6,22 +6,36 @@ export type PersistedState = {
   activeClass: string
   students: Student[]
   uploadedFiles: UploadedItem[]
+  calendarUploadedFiles: UploadedItem[]
   holidays: Holiday[]
   evaluations: Evaluation[]
   publicationRecords: PublicationRecord[]
 }
 
 const fallbackBaseUrl = 'http://localhost:3000'
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || fallbackBaseUrl).replace(/\/$/, '')
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+const apiBaseUrl = (
+  configuredApiBaseUrl ||
+  (import.meta.env.DEV ? fallbackBaseUrl : '')
+).replace(/\/$/, '')
 
 export const defaultPersistedState: PersistedState = {
   classes: [],
   activeClass: '',
   students: [],
   uploadedFiles: [],
+  calendarUploadedFiles: [],
   holidays: [],
   evaluations: [],
   publicationRecords: [],
+}
+
+function getApiUrl(path: string) {
+  if (!apiBaseUrl) {
+    throw new Error('VITE_API_BASE_URL não configurada para persistência em produção.')
+  }
+
+  return `${apiBaseUrl}${path}`
 }
 
 function sanitizeState(value: unknown): PersistedState {
@@ -35,6 +49,9 @@ function sanitizeState(value: unknown): PersistedState {
     activeClass: typeof data.activeClass === 'string' ? data.activeClass : '',
     students: Array.isArray(data.students) ? data.students : [],
     uploadedFiles: Array.isArray(data.uploadedFiles) ? data.uploadedFiles : [],
+    calendarUploadedFiles: Array.isArray(data.calendarUploadedFiles)
+      ? data.calendarUploadedFiles
+      : [],
     holidays: Array.isArray(data.holidays) ? data.holidays : [],
     evaluations: Array.isArray(data.evaluations) ? data.evaluations : [],
     publicationRecords: Array.isArray(data.publicationRecords)
@@ -44,7 +61,7 @@ function sanitizeState(value: unknown): PersistedState {
 }
 
 export async function loadAppState(): Promise<PersistedState> {
-  const response = await fetch(`${apiBaseUrl}/api/state`)
+  const response = await fetch(getApiUrl('/api/state'))
   if (!response.ok) {
     throw new Error('Não foi possível carregar os dados salvos.')
   }
@@ -54,7 +71,7 @@ export async function loadAppState(): Promise<PersistedState> {
 }
 
 export async function saveAppState(state: PersistedState): Promise<void> {
-  const response = await fetch(`${apiBaseUrl}/api/state`, {
+  const response = await fetch(getApiUrl('/api/state'), {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',

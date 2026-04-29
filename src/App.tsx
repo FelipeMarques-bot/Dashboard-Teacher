@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import './App.css'
@@ -37,6 +37,7 @@ type Section =
   | 'Configurações'
 
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
+const AUTO_SAVE_DEBOUNCE_MS = 500
 
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
@@ -168,14 +169,13 @@ function App() {
   const [selectedDriveFileId, setSelectedDriveFileId] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [publicationRecords, setPublicationRecords] = useState<PublicationRecord[]>([])
-  const [agentConfig] = useState<AgentIntegrationConfig>(defaultAgentConfig)
+  const agentConfig: AgentIntegrationConfig = defaultAgentConfig
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(isFirebaseConfigured)
   const [authError, setAuthError] = useState('')
   const [dashboardLoadTime] = useState(() => Date.now())
   const [isStateReady, setIsStateReady] = useState(false)
-  const hasLoadedRemoteState = useRef(false)
 
   const [classForm, setClassForm] = useState({
     name: '',
@@ -221,27 +221,34 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (hasLoadedRemoteState.current) return
-    hasLoadedRemoteState.current = true
+    let cancelled = false
 
     void loadAppState()
       .then((state) => {
+        if (cancelled) return
         setClasses(state.classes)
         setActiveClass(state.activeClass)
         setStudents(state.students)
         setUploadedFiles(state.uploadedFiles)
+        setCalendarUploadedFiles(state.calendarUploadedFiles)
         setHolidays(state.holidays)
         setEvaluations(state.evaluations)
         setPublicationRecords(state.publicationRecords)
       })
       .catch((error) => {
+        if (cancelled) return
         const message =
           error instanceof Error ? error.message : 'Falha ao carregar estado salvo.'
         setIntegrationMessage(message)
       })
       .finally(() => {
+        if (cancelled) return
         setIsStateReady(true)
       })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -252,6 +259,7 @@ function App() {
       activeClass,
       students,
       uploadedFiles,
+      calendarUploadedFiles,
       holidays,
       evaluations,
       publicationRecords,
@@ -263,7 +271,7 @@ function App() {
           error instanceof Error ? error.message : 'Falha ao salvar estado no servidor.'
         setIntegrationMessage(message)
       })
-    }, 500)
+    }, AUTO_SAVE_DEBOUNCE_MS)
 
     return () => {
       window.clearTimeout(timer)
@@ -274,6 +282,7 @@ function App() {
     activeClass,
     students,
     uploadedFiles,
+    calendarUploadedFiles,
     holidays,
     evaluations,
     publicationRecords,
@@ -343,21 +352,26 @@ function App() {
     const noteIndex = getIndex(['observacao', 'obs'])
     const dataRows = hasHeader ? rows.slice(1) : rows
     const fallbackClassName = activeClass || studentForm.className
-    const existingClassKeys = new Set(classes.map((item) => `${item.school}::${item.name}`))
+    const existingClassKeys = new Set(
+      classes.map((item) => JSON.stringify([item.school, item.name])),
+    )
     const importedClasses: ClassItem[] = []
     const importedStudents: Student[] = []
 
     dataRows.forEach((row, index) => {
-      const inferredSchool = schoolIndex >= 0 ? row[schoolIndex] : row.length >= 3 ? row[0] : ''
-      const inferredClassName = classIndex >= 0 ? row[classIndex] : row.length >= 3 ? row[1] : ''
+      const hasSchoolAndClassColumns = row.length >= 3
+      const inferredSchool =
+        schoolIndex >= 0 ? row[schoolIndex] : hasSchoolAndClassColumns ? row[0] : ''
+      const inferredClassName =
+        classIndex >= 0 ? row[classIndex] : hasSchoolAndClassColumns ? row[1] : ''
       const inferredStudentName =
         studentIndex >= 0
           ? row[studentIndex]
-          : row.length >= 3
+          : hasSchoolAndClassColumns
             ? row[2]
             : row[0]
       const inferredNote =
-        noteIndex >= 0 ? row[noteIndex] : row.length >= 3 ? row[3] || '' : row[1] || ''
+        noteIndex >= 0 ? row[noteIndex] : hasSchoolAndClassColumns ? row[3] || '' : row[1] || ''
 
       const className = inferredClassName || fallbackClassName
       const school = inferredSchool || 'Escola não informada'
@@ -366,7 +380,7 @@ function App() {
         return
       }
 
-      const classKey = `${school}::${className}`
+      const classKey = JSON.stringify([school, className])
       if (!existingClassKeys.has(classKey)) {
         existingClassKeys.add(classKey)
         importedClasses.push({ name: className, school, shift: 'Manhã' })
@@ -1342,6 +1356,7 @@ function App() {
                     activeClass,
                     students,
                     uploadedFiles,
+                    calendarUploadedFiles,
                     holidays,
                     evaluations,
                     publicationRecords,
