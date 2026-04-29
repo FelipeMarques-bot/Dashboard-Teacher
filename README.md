@@ -107,7 +107,7 @@ npm.cmd run dev:local
 - Backend/API: `http://localhost:3000`
 - Healthcheck: `http://localhost:3000/api/health` (deve retornar `"storage":"file"`)
 
-> Observação de segurança: o script local usa `--host 0.0.0.0`, que expõe o servidor de desenvolvimento em todas as interfaces de rede e pode permitir acesso indevido por outros dispositivos.
+> Observação de segurança: o script local usa `--host 0.0.0.0`, que expõe o servidor de desenvolvimento em todas as interfaces de rede e pode permitir acesso indesejado por outros dispositivos.
 > Mitigação recomendada: mantenha firewall ativo/restritivo e use rede confiável; opcionalmente ajuste para `localhost`.
 
 ### 6) Subir localmente em modo produção
