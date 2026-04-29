@@ -89,7 +89,7 @@ npm.cmd install
    VITE_API_BASE_URL=http://localhost:3000
    ```
 3. Preencha o `.env.local` com suas credenciais do Firebase.
-4. Deixe `DATABASE_URL` indefinida (não adicione essa variável em `.env.local` nem `.env.api`) para usar banco interno em arquivo.
+4. Deixe `DATABASE_URL` indefinida (não adicione essa variável em `.env.local` nem `.env.api`); a ausência dela ativa o armazenamento local em arquivo (`server/data/state.json`).
 
 ### 5) Subir frontend + backend juntos (modo desenvolvimento)
 
@@ -130,9 +130,9 @@ npm run start:local
    - Programa/script: `C:\Windows\System32\cmd.exe`  
    - Argumentos:
       ```bat
-     /c cd /d "C:\projetos\Dashboard-Teacher" && npm run start:local
+      /c cd /d "C:\projetos\Dashboard-Teacher" && npm run start:local
       ```
-   - Se você clonou em outro local, troque `C:\projetos\Dashboard-Teacher` pelo caminho real da sua máquina.
+   - **Obrigatório:** se você clonou em outro local, troque `C:\projetos\Dashboard-Teacher` pelo caminho real da sua máquina.
 4. Salve e teste deslogando/logando novamente.
 
 ### Linux (systemd --user)
