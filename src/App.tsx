@@ -117,6 +117,11 @@ function findLikelyStudentColumn(row: string[]) {
   return -1
 }
 
+function sanitizeClassLabel(value: string) {
+  const normalized = value.replace(/^turma\s*/i, '').trim()
+  return normalized || value
+}
+
 function extractStudentsByDenseColumns(rows: string[][], schoolName: string) {
   if (rows.length === 0) return [] as string[][]
 
@@ -147,7 +152,7 @@ function extractStudentsByDenseColumns(rows: string[][], schoolName: string) {
       if (!candidate) continue
       if (isStudentHeader(candidate) || isLikelyMetadataCell(candidate)) continue
       if (isLikelyStudentName(candidate)) continue
-      className = candidate.replace(/^turma\s*/i, '').trim() || candidate
+      className = sanitizeClassLabel(candidate)
       break
     }
 
@@ -257,7 +262,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
         .map((row) => {
           const student = row[studentIndex]?.trim() ?? ''
           const classNameFromRow = classIndex >= 0 ? row[classIndex]?.trim() ?? '' : ''
-          const className = classNameFromRow || sheetName
+          const className = classNameFromRow || DEFAULT_MISSING_CLASS_NAME
           const school = schoolIndex >= 0 ? row[schoolIndex]?.trim() ?? '' : sheetName
           const note = noteIndex >= 0 ? row[noteIndex]?.trim() ?? '' : ''
           return [school, className, student, note]
@@ -277,7 +282,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
       for (let rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
         const candidate = normalizedRows[rowIndex]?.[columnIndex]?.trim() ?? ''
         if (isIgnoredStudentValue(candidate)) continue
-        className = candidate.replace(/^turma\s*/i, '').trim() || candidate
+        className = sanitizeClassLabel(candidate)
         break
       }
 
