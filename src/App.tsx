@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import './App.css'
@@ -8,6 +8,11 @@ import {
   fetchDriveFiles,
   publishGrades,
 } from './services/agentIntegration'
+import {
+  loadAppState,
+  saveAppState,
+  type PersistedState,
+} from './services/appStateApi'
 import {
   isFirebaseConfigured,
   observeAuthState,
@@ -20,6 +25,7 @@ import type {
   IntegrationProvider,
   PublicationRecord,
 } from './services/agentIntegration'
+import type { ClassItem, Evaluation, Holiday, Student, UploadedItem } from './types'
 
 type Section =
   | 'Início'
@@ -29,42 +35,6 @@ type Section =
   | 'Alunos'
   | 'Relatórios'
   | 'Configurações'
-
-type ClassItem = {
-  name: string
-  school: string
-  shift: string
-}
-
-type Student = {
-  id: number
-  name: string
-  className: string
-  grades: number[]
-  note: string
-}
-
-type UploadedItem = {
-  name: string
-  type: 'CSV' | 'PDF'
-  size: string
-  rows?: string[][]
-}
-
-type Holiday = {
-  name: string
-  date: string
-  type: 'Nacional' | 'Estadual' | 'Municipal' | 'Pedagógica'
-}
-
-type Evaluation = {
-  id: number
-  name: string
-  className: string
-  school: string
-  date: string
-  status: 'Agendada'
-}
 
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 
@@ -112,28 +82,48 @@ function parseCsv(content: string) {
     .map((line) => line.split(',').map((cell) => cell.trim()))
 }
 
+function normalizeHeader(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim()
+}
+
+function getHolidayType(value: string): Holiday['type'] {
+  const normalized = normalizeHeader(value)
+  if (normalized.includes('estadual')) return 'Estadual'
+  if (normalized.includes('municipal')) return 'Municipal'
+  if (normalized.includes('pedagog')) return 'Pedagógica'
+  return 'Nacional'
+}
+
 function UploadPanel({
   title,
   items,
   onUpload,
+  accept = '.csv,application/pdf',
+  actionLabel = 'Subir CSV/PDF',
 }: {
   title: string
   items: UploadedItem[]
   onUpload: (files: FileList | null) => Promise<void>
+  accept?: string
+  actionLabel?: string
 }) {
   return (
     <div className="card">
       <div className="section-heading">
         <h3>{title}</h3>
         <label className="btn btn-accent" htmlFor={title}>
-          Subir CSV/PDF
+          {actionLabel}
         </label>
       </div>
       <input
         id={title}
         className="hidden-input"
         type="file"
-        accept=".csv,application/pdf"
+        accept={accept}
         multiple
         onChange={(event) => {
           void onUpload(event.target.files)
@@ -169,6 +159,7 @@ function App() {
   const [activeClass, setActiveClass] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedItem[]>([])
+  const [calendarUploadedFiles, setCalendarUploadedFiles] = useState<UploadedItem[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [selectedDay, setSelectedDay] = useState<number | null>(null)
   const [driveConnected, setDriveConnected] = useState(false)
@@ -185,6 +176,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(isFirebaseConfigured)
   const [authError, setAuthError] = useState('')
   const [dashboardLoadTime] = useState(() => Date.now())
+  const [isStateReady, setIsStateReady] = useState(false)
+  const hasLoadedRemoteState = useRef(false)
 
   const [classForm, setClassForm] = useState({
     name: '',
@@ -228,6 +221,65 @@ function App() {
       unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (hasLoadedRemoteState.current) return
+    hasLoadedRemoteState.current = true
+
+    void loadAppState()
+      .then((state) => {
+        setClasses(state.classes)
+        setActiveClass(state.activeClass)
+        setStudents(state.students)
+        setUploadedFiles(state.uploadedFiles)
+        setHolidays(state.holidays)
+        setEvaluations(state.evaluations)
+        setPublicationRecords(state.publicationRecords)
+      })
+      .catch((error) => {
+        const message =
+          error instanceof Error ? error.message : 'Falha ao carregar estado salvo.'
+        setIntegrationMessage(message)
+      })
+      .finally(() => {
+        setIsStateReady(true)
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!isStateReady) return
+
+    const state: PersistedState = {
+      classes,
+      activeClass,
+      students,
+      uploadedFiles,
+      holidays,
+      evaluations,
+      publicationRecords,
+    }
+
+    const timer = window.setTimeout(() => {
+      void saveAppState(state).catch((error) => {
+        const message =
+          error instanceof Error ? error.message : 'Falha ao salvar estado no servidor.'
+        setIntegrationMessage(message)
+      })
+    }, 500)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [
+    isStateReady,
+    classes,
+    activeClass,
+    students,
+    uploadedFiles,
+    holidays,
+    evaluations,
+    publicationRecords,
+  ])
 
   const holidaySet = useMemo(
     () => new Set(holidays.map((holiday) => holiday.date)),
@@ -281,25 +333,107 @@ function App() {
   const importStudentsFromRows = (rows: string[][]) => {
     if (rows.length === 0) return
 
-    const className = activeClass || studentForm.className
-    if (!className) {
-      setIntegrationMessage('Selecione ou cadastre uma turma antes de importar alunos.')
-      return
-    }
+    const headers = rows[0].map((value) => normalizeHeader(value))
+    const hasHeader = headers.some((value) =>
+      ['aluno', 'nome', 'turma', 'classe', 'escola', 'observacao', 'obs'].includes(value),
+    )
 
-    const importedStudents = rows
-      .map((row, index) => ({
+    const getIndex = (options: string[]) => headers.findIndex((header) => options.includes(header))
+    const schoolIndex = getIndex(['escola'])
+    const classIndex = getIndex(['turma', 'classe'])
+    const studentIndex = getIndex(['aluno', 'nome'])
+    const noteIndex = getIndex(['observacao', 'obs'])
+    const dataRows = hasHeader ? rows.slice(1) : rows
+    const fallbackClassName = activeClass || studentForm.className
+    const existingClassKeys = new Set(classes.map((item) => `${item.school}::${item.name}`))
+    const importedClasses: ClassItem[] = []
+    const importedStudents: Student[] = []
+
+    dataRows.forEach((row, index) => {
+      const inferredSchool = schoolIndex >= 0 ? row[schoolIndex] : row.length >= 3 ? row[0] : ''
+      const inferredClassName = classIndex >= 0 ? row[classIndex] : row.length >= 3 ? row[1] : ''
+      const inferredStudentName =
+        studentIndex >= 0
+          ? row[studentIndex]
+          : row.length >= 3
+            ? row[2]
+            : row[0]
+      const inferredNote =
+        noteIndex >= 0 ? row[noteIndex] : row.length >= 3 ? row[3] || '' : row[1] || ''
+
+      const className = inferredClassName || fallbackClassName
+      const school = inferredSchool || 'Escola não informada'
+
+      if (!inferredStudentName || !className) {
+        return
+      }
+
+      const classKey = `${school}::${className}`
+      if (!existingClassKeys.has(classKey)) {
+        existingClassKeys.add(classKey)
+        importedClasses.push({ name: className, school, shift: 'Manhã' })
+      }
+
+      importedStudents.push({
         id: Date.now() + index,
-        name: row[0] || `Aluno importado ${index + 1}`,
+        name: inferredStudentName,
         className,
         grades: [0, 0, 0],
-        note: row[1] || '',
-      }))
-      .filter((student) => student.name.trim().length > 0)
+        note: inferredNote || '',
+      })
+    })
+
+    if (importedClasses.length > 0) {
+      setClasses((prev) => [...importedClasses, ...prev])
+      if (!activeClass) {
+        setActiveClass(importedClasses[0].name)
+      }
+    }
 
     if (importedStudents.length > 0) {
       setStudents((prev) => [...prev, ...importedStudents])
+      setIntegrationMessage(
+        `${importedStudents.length} aluno(s) importado(s) e ${importedClasses.length} turma(s) organizada(s).`,
+      )
+      return
     }
+
+    setIntegrationMessage('Nenhum aluno válido encontrado no CSV.')
+  }
+
+  const importHolidaysFromRows = (rows: string[][]) => {
+    if (rows.length === 0) return
+
+    const headers = rows[0].map((value) => normalizeHeader(value))
+    const hasHeader = headers.some((value) =>
+      ['data', 'dia', 'nome', 'evento', 'tipo'].includes(value),
+    )
+    const dateIndex = headers.findIndex((value) => value === 'data' || value === 'dia')
+    const nameIndex = headers.findIndex((value) => value === 'nome' || value === 'evento')
+    const typeIndex = headers.findIndex((value) => value === 'tipo')
+    const dataRows = hasHeader ? rows.slice(1) : rows
+    const imported: Holiday[] = []
+
+    dataRows.forEach((row, index) => {
+      const date = (dateIndex >= 0 ? row[dateIndex] : row[0])?.trim()
+      const name = (nameIndex >= 0 ? row[nameIndex] : row[1])?.trim()
+      const rawType = (typeIndex >= 0 ? row[typeIndex] : row[2])?.trim() ?? 'Nacional'
+      if (!date || !name) return
+
+      imported.push({
+        date,
+        name,
+        type: getHolidayType(rawType),
+      })
+    })
+
+    if (imported.length > 0) {
+      setHolidays((prev) => [...imported, ...prev])
+      setIntegrationMessage(`${imported.length} feriado(s)/parada(s) importado(s).`)
+      return
+    }
+
+    setIntegrationMessage('Nenhum feriado válido encontrado no arquivo.')
   }
 
   const handleFileUpload = async (files: FileList | null) => {
@@ -334,6 +468,31 @@ function App() {
       .flatMap((file) => file.rows ?? [])
 
     importStudentsFromRows(csvRows)
+  }
+
+  const handleHolidayFileUpload = async (files: FileList | null) => {
+    if (!files) return
+
+    const parsedFiles = await Promise.all(
+      Array.from(files).map(async (file) => {
+        const text = await file.text()
+        const rows = parseCsv(text)
+        return {
+          name: file.name,
+          type: 'CSV' as const,
+          size: fileSizeLabel(file.size),
+          rows,
+        }
+      }),
+    )
+
+    setCalendarUploadedFiles((prev) => [...parsedFiles, ...prev])
+
+    const csvRows = parsedFiles
+      .filter((file) => file.rows && file.rows.length > 0)
+      .flatMap((file) => file.rows ?? [])
+
+    importHolidaysFromRows(csvRows)
   }
 
   const updateGrade = (studentId: number, gradeIndex: number, value: string) => {
@@ -681,6 +840,14 @@ function App() {
             ) : (
               <p className="muted">Clique em um dia para abrir os detalhes.</p>
             )}
+
+            <UploadPanel
+              title="Importação de feriados e paradas pedagógicas"
+              items={calendarUploadedFiles}
+              onUpload={handleHolidayFileUpload}
+              accept=".csv,text/csv"
+              actionLabel="Subir CSV de feriados"
+            />
 
             <form className="form" onSubmit={addHoliday}>
               <h4>Adicionar feriado/evento</h4>
@@ -1164,52 +1331,36 @@ function App() {
             </div>
 
             <div className="form integration-config">
-              <h4>Configuração da API</h4>
-              <select
-                value={agentConfig.mode}
-                onChange={(event) =>
-                  setAgentConfig((prev) => ({
-                    ...prev,
-                    mode: event.target.value as AgentIntegrationConfig['mode'],
-                  }))
-                }
+              <h4>Persistência e sincronização</h4>
+              <p className="muted">
+                O sistema salva automaticamente turmas, alunos, avaliações e feriados no backend.
+              </p>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  const state: PersistedState = {
+                    classes,
+                    activeClass,
+                    students,
+                    uploadedFiles,
+                    holidays,
+                    evaluations,
+                    publicationRecords,
+                  }
+                  void saveAppState(state)
+                    .then(() => setIntegrationMessage('Dados sincronizados com sucesso.'))
+                    .catch((error) => {
+                      const message =
+                        error instanceof Error
+                          ? error.message
+                          : 'Falha ao sincronizar dados manualmente.'
+                      setIntegrationMessage(message)
+                    })
+                }}
               >
-                <option value="mock">Modo simulado (atual)</option>
-                <option value="api">Modo API</option>
-              </select>
-              <input
-                placeholder="Base URL da API"
-                value={agentConfig.baseUrl}
-                onChange={(event) =>
-                  setAgentConfig((prev) => ({ ...prev, baseUrl: event.target.value }))
-                }
-              />
-              <label className="checkbox-line">
-                <input
-                  type="checkbox"
-                  checked={agentConfig.aiApiEnabled}
-                  onChange={(event) =>
-                    setAgentConfig((prev) => ({
-                      ...prev,
-                      aiApiEnabled: event.target.checked,
-                    }))
-                  }
-                />
-                Ativar agente por API de IA
-              </label>
-              <label className="checkbox-line">
-                <input
-                  type="checkbox"
-                  checked={agentConfig.apiKeyConfigured}
-                  onChange={(event) =>
-                    setAgentConfig((prev) => ({
-                      ...prev,
-                      apiKeyConfigured: event.target.checked,
-                    }))
-                  }
-                />
-                Chave de API configurada
-              </label>
+                Sincronizar agora
+              </button>
             </div>
 
             <p className="muted">{integrationMessage || 'Sem operações recentes.'}</p>
