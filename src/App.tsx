@@ -64,6 +64,16 @@ function isSchoolHeader(value: string) {
   return normalizeHeader(value) === 'escola'
 }
 
+function isLikelyStudentName(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return false
+  if (normalized.length < 3) return false
+  if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(normalized)) return false
+
+  const onlyDigitsAndMarks = normalized.replace(/[0-9\s.,;:/\\\-()[\]]/g, '')
+  return onlyDigitsAndMarks.length > 0
+}
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -483,22 +493,26 @@ function App() {
     dataRows.forEach((row, index) => {
       const hasSchoolAndClassColumns = row.length >= 3
       const inferredSchool =
-        schoolIndex >= 0 ? row[schoolIndex] : hasSchoolAndClassColumns ? row[0] : ''
+        schoolIndex >= 0 ? row[schoolIndex]?.trim() : hasSchoolAndClassColumns ? row[0]?.trim() : ''
       const inferredClassName =
-        classIndex >= 0 ? row[classIndex] : hasSchoolAndClassColumns ? row[1] : ''
+        classIndex >= 0 ? row[classIndex]?.trim() : hasSchoolAndClassColumns ? row[1]?.trim() : ''
       const inferredStudentName =
         studentIndex >= 0
-          ? row[studentIndex]
+          ? row[studentIndex]?.trim()
           : hasSchoolAndClassColumns
-            ? row[2]
-            : row[0]
+            ? row[2]?.trim()
+            : row[0]?.trim()
       const inferredNote =
-        noteIndex >= 0 ? row[noteIndex] : hasSchoolAndClassColumns ? row[3] || '' : row[1] || ''
+        noteIndex >= 0
+          ? row[noteIndex]?.trim()
+          : hasSchoolAndClassColumns
+            ? row[3]?.trim() || ''
+            : row[1]?.trim() || ''
 
-      const className = inferredClassName || fallbackClassName
+      const className = inferredClassName || fallbackClassName || 'Turma não informada'
       const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
 
-      if (!inferredStudentName || !className) {
+      if (!isLikelyStudentName(inferredStudentName || '')) {
         return
       }
 
