@@ -518,9 +518,8 @@ function App() {
     setIntegrationMessage('Nenhum aluno válido encontrado no arquivo.')
   }
 
-  const importHolidaysFromRows = (rows: string[][]) => {
-    if (rows.length === 0) return
-
+  const parseHolidaysFromRows = (rows: string[][]) => {
+    if (rows.length === 0) return [] as Holiday[]
     const headers = rows[0].map((value) => normalizeHeader(value))
     const hasHeader = headers.some((value) =>
       ['data', 'dia', 'nome', 'evento', 'tipo'].includes(value),
@@ -544,13 +543,7 @@ function App() {
       })
     })
 
-    if (imported.length > 0) {
-      setHolidays((prev) => [...imported, ...prev])
-      setIntegrationMessage(`${imported.length} feriado(s)/parada(s) importado(s).`)
-      return
-    }
-
-    setIntegrationMessage('Nenhum feriado válido encontrado no arquivo.')
+    return imported
   }
 
   const handleFileUpload = async (files: FileList | null) => {
@@ -619,27 +612,71 @@ function App() {
 
   const handleHolidayFileUpload = async (files: FileList | null) => {
     if (!files) return
+    try {
+      const parsedFiles = await Promise.all(
+        Array.from(files).map(async (file) => {
+          const lowerName = file.name.toLowerCase()
+          const isCsv = lowerName.endsWith('.csv')
+          const isXlsx = lowerName.endsWith('.xlsx')
 
-    const parsedFiles = await Promise.all(
-      Array.from(files).map(async (file) => {
-        const text = await file.text()
-        const rows = parseCsv(text)
-        return {
-          name: file.name,
-          type: 'CSV' as const,
-          size: fileSizeLabel(file.size),
-          rows,
-        }
-      }),
-    )
+          if (isCsv) {
+            const text = await file.text()
+            const rows = parseCsv(text)
+            return {
+              name: file.name,
+              type: 'CSV' as const,
+              size: fileSizeLabel(file.size),
+              rows,
+              holidays: parseHolidaysFromRows(rows),
+            }
+          }
 
-    setCalendarUploadedFiles((prev) => [...parsedFiles, ...prev])
+          if (isXlsx) {
+            const sheets = await readXlsxFile(file)
+            const rowsBySheet = sheets.map((sheet) =>
+              sheet.data.map((row: unknown[]) => row.map(normalizeCellValue)),
+            )
+            const importedHolidays = rowsBySheet.flatMap((rows) => parseHolidaysFromRows(rows))
 
-    const csvRows = parsedFiles
-      .filter((file) => file.rows && file.rows.length > 0)
-      .flatMap((file) => file.rows ?? [])
+            return {
+              name: file.name,
+              type: 'XLSX' as const,
+              size: fileSizeLabel(file.size),
+              rows: rowsBySheet.flat(),
+              holidays: importedHolidays,
+            }
+          }
 
-    importHolidaysFromRows(csvRows)
+          return {
+            name: file.name,
+            type: 'PDF' as const,
+            size: fileSizeLabel(file.size),
+            holidays: [] as Holiday[],
+          }
+        }),
+      )
+
+      const uploadItems = parsedFiles.map((file) => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        rows: file.rows,
+      }))
+      setCalendarUploadedFiles((prev) => [...uploadItems, ...prev])
+
+      const importedHolidays = parsedFiles.flatMap((file) => file.holidays)
+      if (importedHolidays.length > 0) {
+        setHolidays((prev) => [...importedHolidays, ...prev])
+        setIntegrationMessage(`${importedHolidays.length} feriado(s)/parada(s) importado(s).`)
+        return
+      }
+
+      setIntegrationMessage('Nenhum feriado válido encontrado no arquivo.')
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao processar o arquivo enviado.'
+      setIntegrationMessage(message)
+    }
   }
 
   const updateGrade = (studentId: number, gradeIndex: number, value: string) => {
@@ -992,8 +1029,8 @@ function App() {
               title="Importação de feriados e paradas pedagógicas"
               items={calendarUploadedFiles}
               onUpload={handleHolidayFileUpload}
-              accept=".csv,text/csv"
-              actionLabel="Subir CSV de feriados"
+              accept=".csv,.xlsx"
+              actionLabel="Subir CSV/XLSX de feriados"
             />
 
             <form className="form" onSubmit={addHoliday}>

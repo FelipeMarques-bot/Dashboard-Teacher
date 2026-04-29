@@ -20,7 +20,7 @@ npm run build
 ## Recursos atuais
 
 - Importação de alunos via CSV/XLSX (suporta múltiplas abas no XLSX e colunas de escola, turma, aluno e observação).
-- Importação de feriados/paradas pedagógicas via CSV.
+- Importação de feriados/paradas pedagógicas via CSV/XLSX (inclui múltiplas abas no XLSX).
 - Persistência automática de turmas, alunos, avaliações, feriados e histórico no backend.
 
 ## Login com Google (Firebase)
@@ -65,6 +65,7 @@ DATABASE_SSL=true
 - [ ] Após criar, copie:
   - [ ] **Internal Database URL** (para `DATABASE_URL` no backend)
   - [ ] **External Database URL** (opcional, para acesso externo)
+- [ ] Onde encontrar: PostgreSQL no Render > **Info** > **Connections** > **Internal Database URL**
 
 ### 2) Criar backend (Web Service)
 
