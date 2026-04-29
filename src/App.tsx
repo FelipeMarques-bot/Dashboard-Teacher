@@ -168,9 +168,7 @@ function App() {
   const [selectedDriveFileId, setSelectedDriveFileId] = useState('')
   const [integrationMessage, setIntegrationMessage] = useState('')
   const [publicationRecords, setPublicationRecords] = useState<PublicationRecord[]>([])
-  const [agentConfig, setAgentConfig] = useState<AgentIntegrationConfig>(
-    defaultAgentConfig,
-  )
+  const [agentConfig] = useState<AgentIntegrationConfig>(defaultAgentConfig)
   const [evaluations, setEvaluations] = useState<Evaluation[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(isFirebaseConfigured)
@@ -414,7 +412,7 @@ function App() {
     const dataRows = hasHeader ? rows.slice(1) : rows
     const imported: Holiday[] = []
 
-    dataRows.forEach((row, index) => {
+    dataRows.forEach((row) => {
       const date = (dateIndex >= 0 ? row[dateIndex] : row[0])?.trim()
       const name = (nameIndex >= 0 ? row[nameIndex] : row[1])?.trim()
       const rawType = (typeIndex >= 0 ? row[typeIndex] : row[2])?.trim() ?? 'Nacional'

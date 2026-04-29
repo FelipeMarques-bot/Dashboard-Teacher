@@ -136,6 +136,5 @@ app.put('/api/state', async (req, res) => {
 })
 
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`API pronta na porta ${port}`)
 })
