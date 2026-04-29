@@ -129,9 +129,13 @@ npm run start:local
 3. Aba **Ações** (recomendado para uso contínuo: `start:local`; use `dev:local` apenas para desenvolvimento):
    - Programa/script: `C:\Windows\System32\cmd.exe`  
    - Argumentos:
-      ```bat
+     ```bat
       /c cd /d "C:\projetos\Dashboard-Teacher" && npm run start:local
       ```
+     > Se houver bloqueio por policy no contexto agendado, use:
+     > ```bat
+     > /c cd /d "C:\projetos\Dashboard-Teacher" && npm.cmd run start:local
+     > ```
    - **Obrigatório:** se você clonou em outro local, troque `C:\projetos\Dashboard-Teacher` pelo caminho real da sua máquina (e faça o mesmo para caminhos no exemplo Linux, se usar systemd).
 4. Salve e teste deslogando/logando novamente.
 
@@ -143,7 +147,7 @@ npm run start:local
    Description=Dashboard Teacher local stack
 
    [Service]
-   WorkingDirectory=/home/$USER/projetos/Dashboard-Teacher
+   WorkingDirectory=%h/projetos/Dashboard-Teacher
    ExecStart=/usr/bin/npm run start:local
    Restart=always
    Environment=PATH=/usr/bin:/usr/local/bin
