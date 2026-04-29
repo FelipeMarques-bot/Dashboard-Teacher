@@ -133,7 +133,8 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
         .slice(headerRowIndex + 1)
         .map((row) => {
           const student = row[studentIndex]?.trim() ?? ''
-          const className = classIndex >= 0 ? row[classIndex]?.trim() ?? '' : ''
+          const classNameFromRow = classIndex >= 0 ? row[classIndex]?.trim() ?? '' : ''
+          const className = classNameFromRow || sheetName
           const school = schoolIndex >= 0 ? row[schoolIndex]?.trim() ?? '' : sheetName
           const note = noteIndex >= 0 ? row[noteIndex]?.trim() ?? '' : ''
           return [school, className, student, note]
@@ -162,10 +163,11 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
         const student = row[columnIndex]?.trim() ?? ''
         const normalizedStudent = normalizeHeader(student)
         if (ignoredStudentValues.has(normalizedStudent)) return
-        const uniqueKey = JSON.stringify([sheetName, className, student])
+        const resolvedClassName = className || sheetName
+        const uniqueKey = JSON.stringify([sheetName, resolvedClassName, student])
         if (uniqueRows.has(uniqueKey)) return
         uniqueRows.add(uniqueKey)
-        extractedByBlocks.push([sheetName, className, student, ''])
+        extractedByBlocks.push([sheetName, resolvedClassName, student, ''])
       })
     })
 
