@@ -50,6 +50,11 @@ function isStudentHeader(value: string) {
   )
 }
 
+function isIgnoredStudentValue(value: string) {
+  const normalized = normalizeHeader(value)
+  return normalized === '' || isStudentHeader(normalized)
+}
+
 function isClassHeader(value: string) {
   const normalized = normalizeHeader(value)
   return normalized === 'turma' || normalized === 'classe'
@@ -113,7 +118,6 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
   if (rows.length === 0) return []
 
   const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
-  const ignoredStudentValues = new Set<string>(['', ...STUDENT_HEADER_VALUES, 'nome do aluno'])
 
   const headerRowIndex = normalizedRows.findIndex((row) =>
     row.some((cell) =>
@@ -152,7 +156,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
           const note = noteIndex >= 0 ? row[noteIndex]?.trim() ?? '' : ''
           return [school, className, student, note]
         })
-        .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+        .filter((row) => !isIgnoredStudentValue(row[2]))
 
       if (extracted.length > 0) {
         return extracted
@@ -166,16 +170,14 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
       let className = ''
       for (let rowIndex = headerRowIndex - 1; rowIndex >= 0; rowIndex -= 1) {
         const candidate = normalizedRows[rowIndex]?.[columnIndex]?.trim() ?? ''
-        const normalizedCandidate = normalizeHeader(candidate)
-        if (!candidate || ignoredStudentValues.has(normalizedCandidate)) continue
+        if (isIgnoredStudentValue(candidate)) continue
         className = candidate.replace(/^turma\s*/i, '').trim() || candidate
         break
       }
 
       normalizedRows.slice(headerRowIndex + 1).forEach((row) => {
         const student = row[columnIndex]?.trim() ?? ''
-        const normalizedStudent = normalizeHeader(student)
-        if (ignoredStudentValues.has(normalizedStudent)) return
+        if (isIgnoredStudentValue(student)) return
         const resolvedClassName = className || sheetName
         const uniqueKey = JSON.stringify([sheetName, resolvedClassName, student])
         if (uniqueRows.has(uniqueKey)) return
@@ -198,7 +200,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
       const note = hasSchoolAndClassColumns ? row[3] ?? '' : row[1] ?? ''
       return [school, className, student, note]
     })
-    .filter((row) => !ignoredStudentValues.has(normalizeHeader(row[2])))
+    .filter((row) => !isIgnoredStudentValue(row[2]))
 }
 
 function normalizeHeader(value: string) {
