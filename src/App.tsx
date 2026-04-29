@@ -40,6 +40,7 @@ type Section =
 const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 const AUTO_SAVE_DEBOUNCE_MS = 500
 const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
+const FALLBACK_CLASS_NAME = 'Turma não informada'
 
 function isStudentHeader(value: string) {
   const normalized = normalizeHeader(value)
@@ -70,7 +71,10 @@ function isLikelyStudentName(value: string) {
   if (normalized.length < 3) return false
   if (!/[A-Za-zÀ-ÖØ-öø-ÿ]/.test(normalized)) return false
 
-  const onlyDigitsAndMarks = normalized.replace(/[0-9\s.,;:/\\\-()[\]]/g, '')
+  const onlyDigitsAndMarks = normalized
+    .replace(/[0-9\s.,;:/\\\-()]/g, '')
+    .replace(/\[/g, '')
+    .replace(/\]/g, '')
   return onlyDigitsAndMarks.length > 0
 }
 
@@ -509,7 +513,7 @@ function App() {
             ? row[3]?.trim() || ''
             : row[1]?.trim() || ''
 
-      const className = inferredClassName || fallbackClassName || 'Turma não informada'
+      const className = inferredClassName || fallbackClassName || FALLBACK_CLASS_NAME
       const school = inferredSchool || fallbackSchoolFromSource || 'Escola não informada'
 
       if (!isLikelyStudentName(inferredStudentName || '')) {
