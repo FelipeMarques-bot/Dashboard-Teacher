@@ -114,8 +114,8 @@ npm run start:local
    Description=Dashboard Teacher local stack
 
    [Service]
-   WorkingDirectory=/home/<seu-usuario>/projetos/Dashboard-Teacher
-   ExecStart=/usr/bin/npm run dev:local
+   WorkingDirectory=/home/$USER/projetos/Dashboard-Teacher
+   ExecStart=/usr/bin/npm run start:local
    Restart=always
    Environment=PATH=/usr/bin:/usr/local/bin
 
