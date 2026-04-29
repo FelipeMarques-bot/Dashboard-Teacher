@@ -117,6 +117,54 @@ function findLikelyStudentColumn(row: string[]) {
   return -1
 }
 
+function extractStudentsByDenseColumns(rows: string[][], schoolName: string) {
+  if (rows.length === 0) return [] as string[][]
+
+  const totalColumns = rows.reduce((max, row) => Math.max(max, row.length), 0)
+  const extracted: string[][] = []
+  const uniqueRows = new Set<string>()
+
+  for (let columnIndex = 0; columnIndex < totalColumns; columnIndex += 1) {
+    const studentRows = rows.reduce<number[]>((acc, row, rowIndex) => {
+      const cell = row[columnIndex]?.trim() ?? ''
+      if (
+        isLikelyStudentName(cell) &&
+        !isLikelyMetadataCell(cell) &&
+        !isStudentHeader(cell)
+      ) {
+        acc.push(rowIndex)
+      }
+      return acc
+    }, [])
+
+    if (studentRows.length < 3) {
+      continue
+    }
+
+    let className = ''
+    for (let rowIndex = studentRows[0] - 1; rowIndex >= 0; rowIndex -= 1) {
+      const candidate = rows[rowIndex]?.[columnIndex]?.trim() ?? ''
+      if (!candidate) continue
+      if (isStudentHeader(candidate) || isLikelyMetadataCell(candidate)) continue
+      if (isLikelyStudentName(candidate)) continue
+      className = candidate.replace(/^turma\s*/i, '').trim() || candidate
+      break
+    }
+
+    studentRows.forEach((rowIndex) => {
+      const student = rows[rowIndex]?.[columnIndex]?.trim() ?? ''
+      if (!student) return
+      const resolvedClassName = className || schoolName
+      const uniqueKey = JSON.stringify([schoolName, resolvedClassName, student])
+      if (uniqueRows.has(uniqueKey)) return
+      uniqueRows.add(uniqueKey)
+      extracted.push([schoolName, resolvedClassName, student, ''])
+    })
+  }
+
+  return extracted
+}
+
 const navItems: { section: Section; icon: string }[] = [
   { section: 'Início', icon: '🏠' },
   { section: 'Calendário', icon: '🗓️' },
@@ -172,11 +220,16 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
 
   const normalizedRows = rows.map((row) => row.map((cell) => cell.trim()))
 
-  const headerRowIndex = normalizedRows.findIndex((row) =>
+  const studentHeaderRowIndex = normalizedRows.findIndex((row) =>
+    row.some((cell) => isStudentHeader(cell)),
+  )
+  const fallbackHeaderRowIndex = normalizedRows.findIndex((row) =>
     row.some((cell) =>
       isStudentHeader(cell) || isClassHeader(cell) || isSchoolHeader(cell),
     ),
   )
+  const headerRowIndex =
+    studentHeaderRowIndex >= 0 ? studentHeaderRowIndex : fallbackHeaderRowIndex
 
   if (headerRowIndex >= 0) {
     const headerRow = normalizedRows[headerRowIndex]
@@ -242,6 +295,11 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
     if (extractedByBlocks.length > 0) {
       return extractedByBlocks
     }
+  }
+
+  const extractedByColumnDensity = extractStudentsByDenseColumns(normalizedRows, sheetName)
+  if (extractedByColumnDensity.length > 0) {
+    return extractedByColumnDensity
   }
 
   return normalizedRows
