@@ -4,7 +4,7 @@ Dashboard de gestão escolar com autenticação Google, importação CSV/XLSX e 
 
 ## Rodar localmente com banco interno (sem Render)
 
-> O backend usa banco interno em arquivo local quando **DATABASE_URL não está definida**.  
+> O backend usa banco interno em arquivo local quando **DATABASE_URL não estiver definida**.  
 > Arquivo local: `server/data/state.json`.
 
 ### 1) Instalar dependências
