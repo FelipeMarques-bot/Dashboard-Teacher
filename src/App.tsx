@@ -41,6 +41,7 @@ const SEVEN_DAYS_IN_MILLISECONDS = 7 * 24 * 60 * 60 * 1000
 const AUTO_SAVE_DEBOUNCE_MS = 500
 const STUDENT_HEADER_VALUES = ['aluno', 'nome', 'nome aluno'] as const
 const DEFAULT_MISSING_CLASS_NAME = 'Turma não informada'
+const CLASS_GRADE_PATTERN = /(?:^|\s)(?:[1-9]|1[0-2])\s*(?:o|º)?(?:\s|$)/
 
 function isStudentHeader(value: string) {
   const normalized = normalizeHeader(value)
@@ -66,9 +67,9 @@ function isClassLabelValue(value: string) {
   if (!normalized) return false
   if (isClassHeader(normalized) || normalized.includes('turma')) return true
 
-  const hasGradeIndicator = /(?:^|\s)[6-9]\s*(?:o|º)?(?:\s|$)/.test(normalized)
+  const hasGradeIndicator = CLASS_GRADE_PATTERN.test(normalized)
   const hasShiftIndicator = /(manha|tarde|noite|vesp|matut|noturn)/.test(normalized)
-  const hasClassSuffix = /(?:^|\s)[6-9]\s*(?:o|º)?\s*[a-z](?:\s|$)/.test(normalized)
+  const hasClassSuffix = /(?:^|\s)(?:[1-9]|1[0-2])\s*(?:o|º)?\s*[a-z](?:\s|$)/.test(normalized)
   const hasYearKeyword = normalized.includes('ano')
 
   return (hasGradeIndicator && (hasYearKeyword || hasShiftIndicator)) || hasClassSuffix
@@ -267,7 +268,7 @@ function extractStudentsFromSheet(rows: string[][], sheetName: string) {
       (value) => value === 'observacao' || value === 'obs',
     )
 
-    const isTabular = schoolIndex >= 0 || classIndex >= 0 || studentHeaderColumns.length === 0
+    const isTabular = schoolIndex >= 0 || classIndex >= 0
 
     if (isTabular && studentIndex >= 0) {
       const extracted = normalizedRows
